@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "nodemon backend/server.js",
-    "socp:check": "node backend/scripts/socp-sign-check.js"
+    "socp:signCheck": "node backend/scripts/socp-sign-check.js",
+    "socp:wsCheck": "node backend/scripts/ws-smoke.js"
   },
   "author": "Paksh Khattar",
   "license": "ISC",

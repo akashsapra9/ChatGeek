@@ -80,3 +80,12 @@ io.on("connection", (socket) => {
     });
 
 });
+
+// === SOCP: start WebSocket listener (dedicated port) ===
+try {
+  const { startMeshWebSocket } = require("./network/wsServer");
+  startMeshWebSocket();
+} catch (e) {
+  console.warn("[SOCP] WS init skipped:", e?.message);
+}
+// === end SOCP ===
