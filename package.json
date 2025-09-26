@@ -4,7 +4,8 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "start": "nodemon backend/server.js"
+    "start": "nodemon backend/server.js",
+    "socp:check": "node backend/scripts/socp-sign-check.js"
   },
   "author": "Paksh Khattar",
   "license": "ISC",
@@ -20,6 +21,7 @@
     "mongoose": "^7.4.4",
     "nodemon": "^3.0.1",
     "react-router-dom": "^5.3.4",
-    "socket.io": "^4.7.2"
+    "socket.io": "^4.7.2",
+    "ws": "^8.18.3"
   }
 }

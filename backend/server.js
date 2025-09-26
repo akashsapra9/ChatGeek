@@ -11,6 +11,18 @@ const app = express()
 dotenv.config();
 connectDB();
 
+// Load SOCP config early (does not start anything yet)
+const meshCfg = require('./network/config');
+console.log('[SOCP] Config loaded', {
+  serverId: meshCfg.SERVER_ID,
+  hasPrivateKey: Boolean(meshCfg.SERVER_PRIVATE_KEY_B64URL),
+  hasPublicKey: Boolean(meshCfg.SERVER_PUBLIC_KEY_B64URL),
+  heartbeatMs: meshCfg.HEARTBEAT_MS,
+  peerDeadMs: meshCfg.PEER_DEAD_MS,
+  meshWsPort: meshCfg.MESH_WS_PORT,
+  introducers: meshCfg.INTRODUCERS.length,
+});
+
 app.use(express.json());
 
 app.get('/', (req, res) => {
