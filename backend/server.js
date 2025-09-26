@@ -7,6 +7,25 @@ const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
+//! TEMP: For debugging.
+const { meshState } = require("./network/state/meshState");
+meshState.userLocations.set("LOCAL-USER-UUID", "local");
+console.log("[SOCP][DEV] Hosted local user: LOCAL-USER-UUID");
+
+const bus = require("./network/events");
+bus.on("network:presenceUpdate", (evt) => console.log("[DBG] presenceUpdate ->", evt));
+bus.on("network:userDeliver", (p) => console.log("[DBG] network:userDeliver ->", p));
+bus.on("network:publicMessage", (p) => console.log("[DBG] publicMessage ->", p));
+bus.on("network:publicKeyShare", (p) => console.log("[DBG] publicKeyShare ->", p));
+bus.on("network:fileStart", (p)=> console.log("[DBG] fileStart", p));
+bus.on("network:fileChunk", (p)=> console.log("[DBG] fileChunk", p));
+bus.on("network:fileEnd",   (p)=> console.log("[DBG] fileEnd", p));
+bus.on("network:ack",   (p) => console.log("[DBG] ACK   <-", p));
+bus.on("network:error", (p) => console.log("[DBG] ERROR <-", p));
+bus.on("network:tx:error", (p) => console.log("[DBG] TX ERROR ->", p));
+bus.on("network:tx:ack",   (p) => console.log("[DBG] TX ACK   ->", p));
+//! END TEMP
+
 const app = express()
 dotenv.config();
 connectDB();
@@ -85,7 +104,22 @@ io.on("connection", (socket) => {
 try {
   const { startMeshWebSocket } = require("./network/wsServer");
   startMeshWebSocket();
+  // === SOCP: dial introducers (if configured) ===
+  try {
+    const { bootstrapIntroducers } = require('./network/peerClient');
+    bootstrapIntroducers();
+  } catch (e) {
+    console.warn('[SOCP] Introducer bootstrap skipped:', e?.message);
+  }
 } catch (e) {
   console.warn("[SOCP] WS init skipped:", e?.message);
 }
-// === end SOCP ===
+
+// === SOCP: start heartbeats & liveness monitor ===
+try {
+  const { startHeartbeats } = require("./network/heartbeat");
+  startHeartbeats();
+  console.log("[SOCP] Heartbeats started");
+} catch (e) {
+  console.warn("[SOCP] Heartbeats init skipped:", e?.message);
+}
