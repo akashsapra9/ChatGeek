@@ -6,7 +6,7 @@ const WebSocket = require("ws");
 
 const PORT = parseInt(process.env.MESH_WS_PORT || "7081", 10);
 const URL  = `ws://127.0.0.1:${PORT}`;
-const PEER_ID = process.env.HB_DUMMY_ID || "hb_dummy"; // optional override
+const PEER_ID = require("crypto").randomUUID();
 const MAX_WAIT_MS = parseInt(process.env.HB_SANITY_TIMEOUT_MS || "30000", 10); // script exit guard
 
 function send(ws, frame) {

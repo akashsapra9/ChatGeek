@@ -13,7 +13,7 @@ const PORT = parseInt(process.env.MESH_WS_PORT || "7081", 10);
 const URL  = `ws://127.0.0.1:${PORT}`;
 
 // Dummy peer identity
-const PEER_ID = process.env.DUMMY_PEER_ID || require("crypto").randomUUID();
+const PEER_ID = require("crypto").randomUUID();
 
 // Load dummy peer keys from env or fallback files created in Step 6.5
 function readB64u(name, file) {

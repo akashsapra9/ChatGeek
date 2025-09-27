@@ -9,12 +9,13 @@ require("dotenv").config();
 const { attach } = require("../network/wsServer");
 
 const PORT = parseInt(process.env.MESH_WS_PORT || "7081", 10);
+const PEER_ID   = require("crypto").randomUUID();
 
 function sendTestFrames(ws, portLabel) {
   console.log(`connected to ${portLabel}; sending SERVER_HELLO_LINK…`);
   ws.send(JSON.stringify({
     type: "SERVER_HELLO_LINK",
-    from: "server_dummy",
+    from: PEER_ID,
     to: "server_local",
     ts: Date.now(),
     payload: { host: "127.0.0.1", port: portLabel, pubkey: "dummy" },
@@ -23,7 +24,7 @@ function sendTestFrames(ws, portLabel) {
     console.log("sending HEARTBEAT…");
     ws.send(JSON.stringify({
       type: "HEARTBEAT",
-      from: "server_dummy",
+      from: PEER_ID,
       to: "*",
       ts: Date.now(),
       payload: { ping: 1 },
