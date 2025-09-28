@@ -35,7 +35,7 @@ const ScrollableChat = ({ messages }) => {
                                     maxWidth: "75%",
                                 }}
                             >
-                                {m.content}
+                                {m.plaintext || "[no content]"}
                             </span>
                         </div>
                     ))}

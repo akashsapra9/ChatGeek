@@ -9,6 +9,7 @@ import axios from 'axios';
 import ScrollableChat from './ScrollableChat';
 import io from 'socket.io-client'
 import './styles.css'
+import { encryptMessage, decryptMessage, signMessage, verifyMessage } from "../utils/crypto";
 
 const ENDPOINT = "http://localhost:5000";
 // eslint-disable-next-line
@@ -42,7 +43,26 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
                 `/api/message/${selectedChat._id}`,
                 config
             );
-            setMessages(data);
+
+            const myPrivKey = localStorage.getItem("my_privkey");
+
+            const decrypted = await Promise.all(
+            data.map(async (m) => {
+                try {
+                // verify signature with sender’s pubkey
+                const ok = await verifyMessage(m.ciphertext, m.content_sig, m.sender.pubkey);
+                if (!ok) return { ...m, plaintext: "[invalid signature]" };
+
+                // decrypt with my private key
+                const plain = await decryptMessage(m.ciphertext, myPrivKey);
+                return { ...m, plaintext: plain };
+                } catch {
+                return { ...m, plaintext: "[decryption failed]" };
+                }
+            })
+            );
+
+            setMessages(decrypted);
             setLoading(false);
 
             socket.emit("join chat", selectedChat._id);
@@ -69,16 +89,26 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
                     },
                 };
                 setNewMessage("");
+                const myPrivKey = localStorage.getItem("my_privkey");
+
+                // pick first recipient (for group chat, loop later)
+                const recipient = selectedChat.users.find(u => u._id !== user._id);
+
+                const ciphertext = await encryptMessage(newMessage, recipient.pubkey);
+                const signature = await signMessage(ciphertext, myPrivKey);
+
                 const { data } = await axios.post(
-                    "/api/message",
-                    {
-                        content: newMessage,
-                        chatId: selectedChat,
-                    },
-                    config
+                "/api/message",
+                {
+                    ciphertext,
+                    content_sig: signature,
+                    chatId: selectedChat._id,
+                },
+                config
                 );
+
                 socket.emit("new message", data);
-                setMessages([...messages, data]);
+                setMessages([...messages, { ...data, plaintext: newMessage }]);
             } catch (error) {
                 toast({
                     title: "Error Occured!",
@@ -109,17 +139,36 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     }, [selectedChat]);
 
     useEffect(() => {
-        socket.on("message recieved", (newMessageRecieved) => {
-            if (
-                !selectedChatCompare || // if chat is not selected or doesn't match current chat
-                selectedChatCompare._id !== newMessageRecieved.chat._id
-            ) {
-                if (!notification.includes(newMessageRecieved)) {
-                    setNotification([newMessageRecieved, ...notification]);
-                    setFetchAgain(!fetchAgain);
-                }
+        socket.on("message recieved", async (newMessageRecieved) => {
+            const myPrivKey = localStorage.getItem("my_privkey");
+
+            let decrypted;
+            try {
+            const ok = await verifyMessage(
+                newMessageRecieved.ciphertext,
+                newMessageRecieved.content_sig,
+                newMessageRecieved.sender.pubkey
+            );
+            if (!ok) {
+                decrypted = { ...newMessageRecieved, plaintext: "[invalid signature]" };
             } else {
-                setMessages([...messages, newMessageRecieved]);
+                const plain = await decryptMessage(newMessageRecieved.ciphertext, myPrivKey);
+                decrypted = { ...newMessageRecieved, plaintext: plain };
+            }
+            } catch {
+            decrypted = { ...newMessageRecieved, plaintext: "[decryption failed]" };
+            }
+
+            if (
+            !selectedChatCompare ||
+            selectedChatCompare._id !== decrypted.chat._id
+            ) {
+            if (!notification.includes(decrypted)) {
+                setNotification([decrypted, ...notification]);
+                setFetchAgain(!fetchAgain);
+            }
+            } else {
+            setMessages([...messages, decrypted]);
             }
         });
     });
