@@ -6,13 +6,14 @@ const userRoutes = require("./routes/userRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
+const { EventEmitter } = require("events");
+const bus = require("./network/events");
 
 //! TEMP: For debugging.
 const { meshState } = require("./network/state/meshState");
 meshState.userLocations.set("LOCAL-USER-UUID", "local");
 console.log("[SOCP][DEV] Hosted local user: LOCAL-USER-UUID");
 
-const bus = require("./network/events");
 bus.on("network:presenceUpdate", (evt) => console.log("[DBG] presenceUpdate ->", evt));
 bus.on("network:userDeliver", (p) => console.log("[DBG] network:userDeliver ->", p));
 bus.on("network:publicMessage", (p) => console.log("[DBG] publicMessage ->", p));
@@ -99,6 +100,62 @@ io.on("connection", (socket) => {
     });
 
 });
+
+// === SLC facades: app.locals.network & app.locals.fileService ===
+const { advertiseUser, removeUser } = require("./network/presence");
+const { sendServerDeliver } = require("./network/delivery");
+const { sendFileStart, sendFileChunk, sendFileEnd } = require("./network/files");
+
+// helper: bridge selected events from our internal bus to a public EventEmitter
+function makeBridge(emitter, mappings) {
+  const bound = [];
+  for (const [srcEvt, dstEvt] of mappings) {
+    const h = (payload) => emitter.emit(dstEvt, payload);
+    bus.on(srcEvt, h);
+    bound.push([srcEvt, h]);
+  }
+  // optional cleanup method if you ever need to tear down
+  emitter.shutdown = () => bound.forEach(([src, h]) => bus.off(src, h));
+  return emitter;
+}
+
+// ---- app.locals.network ----
+// exposes: sendServerDeliver, advertiseUser, and removeUser; emits events for SLC to consume
+const networkEmitter = new EventEmitter();
+networkEmitter.sendServerDeliver = sendServerDeliver;
+networkEmitter.advertiseUser = advertiseUser;
+networkEmitter.removeUser = removeUser;
+
+// Re-emit the network events SLC is likely to care about:
+makeBridge(networkEmitter, [
+  ["network:userDeliver",    "userDeliver"],     // direct messages for local users
+  ["network:presenceUpdate", "presenceUpdate"],  // USER_ADVERTISE / USER_REMOVE
+  ["network:publicMessage",  "publicMessage"],   // public channel fanout
+  ["network:publicKeyShare", "publicKeyShare"],  // key shares for local users
+  ["network:publicUpdate",   "publicUpdate"],    // channel metadata (add/updated)
+  ["network:ack",            "ack"],             // incoming ACKs (optional)
+  ["network:error",          "error"],           // incoming ERRORs (optional)
+]);
+
+app.locals.network = networkEmitter;
+
+// ---- app.locals.fileService ----
+// exposes: sendFileStart, sendFileChunk, sendFileEnd; emits file events
+const fileEmitter = new EventEmitter();
+fileEmitter.sendFileStart = sendFileStart;
+fileEmitter.sendFileChunk = sendFileChunk;
+fileEmitter.sendFileEnd   = sendFileEnd;
+
+makeBridge(fileEmitter, [
+  ["network:fileStart", "fileStart"],
+  ["network:fileChunk", "fileChunk"],
+  ["network:fileEnd",   "fileEnd"],
+]);
+
+app.locals.fileService = fileEmitter;
+
+// Log completion.
+console.log("[SOCP] SLC facades ready: app.locals.network & app.locals.fileService");
 
 // === SOCP: start WebSocket listener (dedicated port) ===
 try {
