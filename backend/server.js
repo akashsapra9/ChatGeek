@@ -14,6 +14,11 @@ const { meshState } = require("./network/state/meshState");
 meshState.userLocations.set("LOCAL-USER-UUID", "local");
 console.log("[SOCP][DEV] Hosted local user: LOCAL-USER-UUID");
 
+// Slc Wire
+const { startSlcServer } = require("./slc/slcServer");
+startSlcServer(app);
+
+
 bus.on("network:presenceUpdate", (evt) => console.log("[DBG] presenceUpdate ->", evt));
 bus.on("network:userDeliver", (p) => console.log("[DBG] network:userDeliver ->", p));
 bus.on("network:publicMessage", (p) => console.log("[DBG] publicMessage ->", p));
