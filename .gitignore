@@ -1,3 +1,17 @@
 myEnv.txt
 temp/*
 !temp/.gitkeep
+
+
+secure-keystore/
+secure-keystore/**
+secure-keystore/slc-pstore/
+secure-keystore/slc-pstore/**
+*.key
+*.crt
+*.csr
+*.srl
+*.pem
+*.pfx
+.env
+.env.*
