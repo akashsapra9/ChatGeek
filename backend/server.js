@@ -12,6 +12,10 @@ const messageRoutes = require("./routes/messageRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const bus = require("./network/events");
 
+// Import models for public channel initialization
+const Group = require("./models/groupModel");
+const GroupMember = require("./models/groupMemberModel");
+
 //! TEMP: For debugging.
 const { meshState } = require("./network/state/meshState");
 meshState.userLocations.set("LOCAL-USER-UUID", "local");
@@ -31,7 +35,45 @@ console.log("[SOCP] Config loaded", {
 
 // ===== Express app =====
 const app = express();
-connectDB();
+
+// ===== Public Channel Initialization Function =====
+const initializePublicChannel = async () => {
+  try {
+    const publicChannelExists = await Group.findOne({ group_id: "public" });
+    
+    if (!publicChannelExists) {
+      await Group.create({
+        group_id: "public",
+        creator_id: "system", 
+        name: "Public Channel",
+        meta: {
+          description: "Network-wide public channel"
+        },
+        version: 1
+      });
+      console.log("[SOCP] Public channel initialized in database");
+    } else {
+      console.log("[SOCP] Public channel already exists in database");
+    }
+    
+    // Optional: Log public channel members count
+    const memberCount = await GroupMember.countDocuments({ group_id: "public" });
+    console.log(`[SOCP] Public channel has ${memberCount} members`);
+    
+  } catch (error) {
+    console.error("[SOCP] Failed to initialize public channel:", error);
+  }
+};
+
+// ===== Database Connection with Public Channel Init =====
+connectDB().then(() => {
+  // Initialize public channel after successful DB connection
+  initializePublicChannel();
+}).catch((error) => {
+  console.error("Database connection failed:", error);
+  process.exit(1);
+});
+
 app.use(express.json());
 
 // Basic health

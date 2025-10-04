@@ -1,10 +1,8 @@
 const express = require('express');
-const { registerUser, authUser, allUsers } = require('../controllers/userControllers');
-const { protect } = require('../middleware/authMiddleware');
+const { registerUser, getUserPublicKey } = require('../controllers/userController');
+const router = express.Router();
 
-const router = express.Router()
-
-router.route('/').post(registerUser).get(protect, allUsers);
-router.post('/login', authUser)
+router.post('/register', registerUser);
+router.get('/pubkey/:user_id', getUserPublicKey);
 
 module.exports = router;
