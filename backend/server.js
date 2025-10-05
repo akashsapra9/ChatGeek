@@ -11,6 +11,9 @@ const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const bus = require("./network/events");
+const fileRoutes = require("./routes/fileRoutes");
+
+
 
 // Import models for public channel initialization
 const Group = require("./models/groupModel");
@@ -83,21 +86,20 @@ app.get("/", (_req, res) => res.send("API is Running"));
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
+app.use("/api/file", fileRoutes);
 
-// (optional) File routes — only mount if present
+// File routes — only mount if present
 try {
-  const fileRoutes = require("./routes/fileRoutes");
-  app.use("/api/file", fileRoutes);
   console.log("[HTTP] /api/file mounted");
 } catch (e) {
   console.log("[HTTP] /api/file not mounted (routes/fileRoutes.js not found yet)");
 }
 
-// ===== Error middleware =====
+// Error middleware
 app.use(notFound);
 app.use(errorHandler);
 
-// ===== Debug event taps (safe to keep) =====
+// Debug event taps (safe to keep)
 bus.on("network:presenceUpdate", (evt) => console.log("[DBG] presenceUpdate ->", evt));
 bus.on("network:userDeliver",   (p) => console.log("[DBG] network:userDeliver ->", p));
 bus.on("network:publicMessage", (p) => console.log("[DBG] publicMessage ->", p));
@@ -110,7 +112,7 @@ bus.on("network:error",         (p) => console.log("[DBG] ERROR <-", p));
 bus.on("network:tx:error",      (p) => console.log("[DBG] TX ERROR ->", p));
 bus.on("network:tx:ack",        (p) => console.log("[DBG] TX ACK   ->", p));
 
-// ===== SLC facades: app.locals.network & app.locals.fileService =====
+// SLC facades: app.locals.network & app.locals.fileService
 const { advertiseUser, removeUser } = require("./network/presence");
 const { sendServerDeliver, broadcastPublicMessage } = require("./network/delivery");
 const { sendFileStart, sendFileChunk, sendFileEnd } = require("./network/files");
@@ -127,7 +129,7 @@ function makeBridge(emitter, mappings) {
   return emitter;
 }
 
-// ---- app.locals.network ----
+// app.locals.network
 const networkEmitter = new EventEmitter();
 networkEmitter.sendServerDeliver = sendServerDeliver;
 networkEmitter.broadcastPublicMessage = broadcastPublicMessage || (async (opaque) => bus.emit("network:publicMessage", opaque));
@@ -146,7 +148,7 @@ makeBridge(networkEmitter, [
 
 app.locals.network = networkEmitter;
 
-// ---- app.locals.fileService ----
+// app.locals.fileService
 const fileEmitter = new EventEmitter();
 fileEmitter.sendFileStart = sendFileStart;
 fileEmitter.sendFileChunk = sendFileChunk;
@@ -162,7 +164,7 @@ app.locals.fileService = fileEmitter;
 
 console.log("[SOCP] SLC facades ready: app.locals.network & app.locals.fileService");
 
-// ===== Start SLC (after app.locals are ready) =====
+// Start SLC (after app.locals are ready)
 try {
   if (process.env.SLC_ENABLED === "true") {
     const { startSlcServer } = require("./slc/slcServer");
@@ -175,7 +177,7 @@ try {
   console.warn("[SLC] not started:", e?.message);
 }
 
-// ===== Start HTTP server + Socket.IO =====
+// Start HTTP server + Socket.IO 
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
   console.log(`Server started on PORT: ${PORT}`);
@@ -217,7 +219,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// ===== SOCP background services =====
+// SOCP background services
 try {
   const { startMeshWebSocket } = require("./network/wsServer");
   startMeshWebSocket();
