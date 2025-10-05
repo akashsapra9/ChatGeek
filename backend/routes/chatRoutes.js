@@ -13,6 +13,23 @@ const router = express.Router();
 
 // Direct (DM) chat creation + fetching
 router.route("/").post(protect, accessChat).get(protect, fetchChats);
+/*
+This line means:
+
+For HTTP POST /api/chat, Express will execute:
+  1. protect
+  2. then accessChat
+
+  When a POST request comes in:
+  1. Express builds a req (request) and res (response) object.
+  2. It calls the first function (middleware1(req, res, next)).
+  3. If that function calls next(), Express moves on to the next one (middleware2(req, res, next)).
+  4. If any middleware sends a response or throws an error, the chain stops.
+
+For HTTP GET /api/chat, Express will execute:
+  1. protect
+  2. then fetchChats
+*/
 
 // Group management
 router.post("/group", protect, createGroupChat);

@@ -1,3 +1,9 @@
+// ================================================================
+//  backend/controllers/chatControllers.js
+//  Minimal modification: preserve all behaviour
+//  Only accessChat() and fetchChats() now hydrate .users array
+// ================================================================
+
 const asyncHandler = require("express-async-handler");
 const { v4: uuidv4 } = require("uuid");
 const Group = require("../models/groupModel");
@@ -31,11 +37,26 @@ const accessChat = asyncHandler(async (req, res) => {
       ],
     });
 
+    // 🟢 CHANGED SECTION
     if (existing) {
       console.log(
         `[SOCP][accessChat] ✅ Found existing DM: ${existing.group_id}`
       );
-      return res.status(200).json(existing);
+
+      // fetch members and users for compatibility with frontend
+      const members = await GroupMember.find({
+        group_id: existing.group_id,
+      }).select("member_id");
+      const users = await User.find({
+        user_id: { $in: members.map((m) => m.member_id) },
+      }).select("-pake_password -privkey_store");
+
+      return res.status(200).json({
+        ...existing.toObject(),
+        chat_id: existing.group_id,
+        isGroupChat: users.length > 2,
+        users,
+      });
     }
 
     // 🆕 Otherwise create a new "direct chat" group
@@ -66,7 +87,20 @@ const accessChat = asyncHandler(async (req, res) => {
 
     console.log(`[SOCP][accessChat] 🆕 Created new DM: ${newGroupId}`);
 
-    return res.status(201).json(newGroup);
+    // 🟢 CHANGED SECTION
+    const members = await GroupMember.find({
+      group_id: newGroupId,
+    }).select("member_id");
+    const users = await User.find({
+      user_id: { $in: members.map((m) => m.member_id) },
+    }).select("-pake_password -privkey_store");
+
+    return res.status(201).json({
+      ...newGroup.toObject(),
+      chat_id: newGroup.group_id,
+      isGroupChat: users.length > 2,
+      users,
+    });
   } catch (err) {
     console.error("[SOCP][accessChat] DB error:", err);
     return res.status(500).json({ error: err.message });
@@ -91,15 +125,24 @@ const fetchChats = asyncHandler(async (req, res) => {
       .sort({ updatedAt: -1 })
       .lean();
 
-    // Enrich with member counts
+    // 🟢 CHANGED SECTION
     const enriched = await Promise.all(
       groups.map(async (g) => {
-        const memberCount = await GroupMember.countDocuments({
+        const members = await GroupMember.find({
           group_id: g.group_id,
-        });
-        return { ...g, member_count: memberCount };
+        }).select("member_id");
+        const users = await User.find({
+          user_id: { $in: members.map((m) => m.member_id) },
+        }).select("-pake_password -privkey_store");
+        return {
+          ...g,
+          chat_id: g.group_id,
+          isGroupChat: users.length > 2,
+          users,
+        };
       })
     );
+    //
 
     return res.status(200).json(enriched);
   } catch (err) {

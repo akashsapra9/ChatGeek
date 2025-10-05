@@ -126,7 +126,10 @@ const MyChat = ({ fetchAgain }) => {
                     .filter((chat) => chat.isCommunity === false)
                     .map((chat) => (
                       <Box
-                        onClick={() => setSelectedChat(chat)}
+                      onClick={() => {
+                        console.log("[MyChats] Selected chat:", chat);
+                        setSelectedChat(chat);
+                      }}
                         key={chat.chat_id}
                         cursor={"pointer"}
                         _hover={{

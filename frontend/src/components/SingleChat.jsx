@@ -32,6 +32,9 @@ import { streamFileTransfer, FileReceiver } from "../utils/fileTransfer";
 const ENDPOINT = "http://localhost:5001";
 var socket, selectedChatCompare;
 
+
+
+
 // ------------------------------------------------------------------
 // Signing helpers
 // ------------------------------------------------------------------
@@ -83,19 +86,22 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
   const [typing, setTyping] = useState(false);
   const [istyping, setIsTyping] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const { selectedChat, setSelectedChat, user, privateKey } = ChatState();
   const fileInputRef = useRef(null);
   const toast = useToast();
 
-  const { selectedChat, setSelectedChat, user, privateKey } = ChatState();
+
 
   const myPrivKey = privateKey;
   const myPubKey = user?.pubkey;
   if (!myPrivKey) console.error("[SOCP] ❌ Missing private key");
   if (!myPubKey) console.error("[SOCP] ❌ Missing public key");
 
+  
+
   const isDM = selectedChat && !selectedChat.isGroupChat && !selectedChat.isCommunity;
   const isGroup = selectedChat && selectedChat.isGroupChat;
-  const isCommunity = selectedChat && selectedChat.isCommunity;
+  // const isCommunity = selectedChat && selectedChat.isCommunity;
 
   // ------------------------------------------------------------------
   // Fetch chat history
@@ -151,6 +157,18 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
       const ts = Date.now();
       const from = user.user_id; // ✅ fixed
       const plaintext = newMessage;
+
+      if (!selectedChat?.users || selectedChat.users.length < 2) {
+        console.error("[SOCP] ⚠️ selectedChat.users not ready or empty:", selectedChat);
+        toast({
+          title: "Chat not ready",
+          description: "Please reselect or reload the chat.",
+          status: "warning",
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
 
       // ---------- Direct Message ----------
       if (isDM) {

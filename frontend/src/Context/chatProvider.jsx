@@ -55,7 +55,11 @@ const ChatProvider = ({ children }) => {
         );
     }, [user, privateKey]);
 
+    useEffect(() => {
+        console.log("[chatProvider] userInfo:", localStorage.getItem("userInfo"));
+      }, []);
 
+      
     return (
         <ChatContext.Provider
         value={{

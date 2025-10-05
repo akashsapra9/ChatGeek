@@ -74,6 +74,7 @@ const Login = () => {
       );
       console.log("4️⃣ Private key decrypted successfully");
 
+        // TODO: this is strange - the response from /api/user/login is just basically whether this user exists. It does not give the actual decrypted private key (of course). If so then the only way we can check if the decrypted key is correct is just whether it starts with "....PRIVATE KEY????"
       if (!decryptedPrivateKey.includes("BEGIN RSA PRIVATE KEY")) {
         console.warn("⚠️ Decrypted key doesn't look like a valid RSA private key");
       }
