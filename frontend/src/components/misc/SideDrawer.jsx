@@ -50,6 +50,7 @@ const SideDrawer = () => {
                     Authorization: `Bearer ${user.token}`
                 }
             }
+            console.log(`[DEBUG][SideDrawer.jsx] Bearer ${user.token}`)
 
             const { data } = await axios.get(`/api/user/search?search=${search}`, config);
 

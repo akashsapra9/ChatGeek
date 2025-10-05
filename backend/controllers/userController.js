@@ -1,6 +1,7 @@
 const User = require("../models/userModel");
 const Group = require("../models/groupModel");
 const GroupMember = require("../models/groupMemberModel");
+const generateToken = require("../config/generateToken");
 
 const registerUser = async (req, res) => {
   try {
@@ -46,6 +47,7 @@ const registerUser = async (req, res) => {
         user_id: user.user_id,
         pubkey: user.pubkey,
         meta: user.meta,
+        token: generateToken(user.user_id), // ✅ Add token
       },
     });
   } catch (error) {
@@ -97,6 +99,7 @@ const loginUser = async (req, res) => {
         pubkey: user.pubkey,
         privkey_store: user.privkey_store, // The encrypted private key
         meta: user.meta,
+        token: generateToken(user.user_id), // ✅ Add token
       },
     });
   } catch (error) {
