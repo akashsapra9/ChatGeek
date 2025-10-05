@@ -3,6 +3,7 @@ import { Button, FormControl, FormLabel, Input, InputGroup, InputRightElement, V
 import { useState } from 'react';
 import axios from 'axios';
 import { useHistory } from 'react-router-dom/cjs/react-router-dom.min';
+import { CryptoUtils } from '../../utils/cryptoUtils';
 
 const Login = () => {
     
@@ -17,8 +18,9 @@ const Login = () => {
     
     const submitHandler = async() => { 
         setLoading(true);
-        if(!userId || !password)
-        {
+        console.log("🚀 Login started for user:", userId);
+        
+        if(!userId || !password) {
             toast({
                 title: "Please fill all the fields!",
                 status: "warning",
@@ -29,18 +31,54 @@ const Login = () => {
             setLoading(false);
             return;
         }
-        try{
+        
+        try {
             const config = {
                 headers: {
                     "Content-type": "application/json"
                 },
             };
             
-            // SOCP: Login with user_id and password for PAKE verification
+            console.log("1. Sending login request to backend...");
+            
+            // First, get user data including encrypted private key
             const { data } = await axios.post("/api/user/login",
             { user_id: userId, password },
             config
             );
+
+            console.log("2. Backend response:", data);
+
+            if (!data.success) {
+                throw new Error(data.error || "Login failed");
+            }
+
+            console.log("3. User data received, encrypted private key length:", data.user.privkey_store?.length);
+            console.log("4. Attempting to decrypt private key...");
+
+            // Decrypt the private key with the password
+            const decryptedPrivateKey = CryptoUtils.decryptPrivateKey(
+                data.user.privkey_store, 
+                password
+            );
+
+            console.log("5. Private key decrypted successfully");
+            console.log("6. Decrypted key starts with:", decryptedPrivateKey.substring(0, 50));
+
+            // Verify this looks like a valid private key
+            if (!decryptedPrivateKey.includes('BEGIN RSA PRIVATE KEY')) {
+                console.warn("⚠️ Decrypted key doesn't look like a valid RSA private key");
+            }
+
+            // Store user info with decrypted private key
+            const userInfo = {
+                ...data.user,
+                privateKey: decryptedPrivateKey
+            };
+
+            console.log("7. Storing user info in localStorage...");
+            
+            localStorage.setItem('userInfo', JSON.stringify(userInfo));
             
             toast({
                 title: "Login Successful!",
@@ -50,15 +88,23 @@ const Login = () => {
                 position: "bottom",
             });
 
-            localStorage.setItem('userInfo', JSON.stringify(data));
             setLoading(false);
-            history.push("/chats")
-        }
-        catch(error)
-        {
+            history.push("/chats");
+            
+        } catch(error) {
+            console.error("❌ Login error details:", error);
+            console.error("❌ Error response:", error.response?.data);
+            
+            let errorMessage = "Login failed";
+            if (error.response?.data?.error) {
+                errorMessage = error.response.data.error;
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
+            
             toast({
                 title: "Error Occurred!",
-                description: error.response?.data?.message || "Login failed",
+                description: errorMessage,
                 status: "error",
                 duration: 5000,
                 isClosable: true,
@@ -72,20 +118,16 @@ const Login = () => {
         <VStack spacing={'5px'} color={"black"}>
 
         <FormControl id='userId' isRequired>
-            <FormLabel>
-            User ID
-            </FormLabel>
-                <Input
-                    placeholder='Enter your User ID'
-                    onChange={(e) => setUserId(e.target.value)}
-                    value={userId}
-                />
+            <FormLabel>User ID</FormLabel>
+            <Input
+                placeholder='Enter your User ID'
+                onChange={(e) => setUserId(e.target.value)}
+                value={userId}
+            />
         </FormControl>
 
         <FormControl id='password' isRequired>
-            <FormLabel>
-            Password
-            </FormLabel>
+            <FormLabel>Password</FormLabel>
             <InputGroup>
                 <Input
                     type={show ? "text" : "password"}
@@ -102,11 +144,11 @@ const Login = () => {
         </FormControl>
 
         <Button
-        colorScheme='blue'
-        w={"100%"}
-        style={{ marginTop: 15 }}
-        onClick={submitHandler}
-        isLoading={loading}
+            colorScheme='blue'
+            w={"100%"}
+            style={{ marginTop: 15 }}
+            onClick={submitHandler}
+            isLoading={loading}
         >
             Login
         </Button>

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import React from 'react'
 import axios from 'axios';
 import { useHistory } from 'react-router-dom/cjs/react-router-dom.min';
+import { CryptoUtils } from '../../utils/cryptoUtils';
 
 const Signup = () => {
 
@@ -49,28 +50,39 @@ const Signup = () => {
                 },
             };
 
-            // SOCP: Generate cryptographic keys on client side
-            // For now, we'll use placeholder keys - in production, generate real RSA-4096 keys
-            const placeholderKeys = {
-                pubkey: `placeholder_public_key_${userId}_${Date.now()}`,
-                privkey_store: `placeholder_encrypted_private_key_${userId}_${Date.now()}`,
-                pake_verifier: `placeholder_pake_verifier_${userId}_${Date.now()}`
-            };
+            console.log("🔑 Generating RSA-4096 key pair...");
+            
+            // Generate RSA-4096 key pair
+            const keyPair = await CryptoUtils.generateKeyPair();
+            console.log("✅ Key pair generated");
+
+            // Generate PAKE verifier
+            const pakeVerifier = CryptoUtils.generatePakeVerifier(password);
+            console.log("✅ PAKE verifier generated");
+
+            // Encrypt private key with user's password
+            const encryptedPrivateKey = CryptoUtils.encryptPrivateKey(keyPair.privateKey, password);
+            console.log("✅ Private key encrypted");
 
             const { data } = await axios.post("/api/user/register",
                 {
                     user_id: userId,
-                    pubkey: placeholderKeys.pubkey,
-                    privkey_store: placeholderKeys.privkey_store,
-                    pake_password: placeholderKeys.pake_verifier,
+                    pubkey: keyPair.publicKey,  // Actual RSA-4096 public key
+                    privkey_store: encryptedPrivateKey,  // Encrypted private key
+                    pake_password: pakeVerifier,  // PAKE verifier
                     meta: {
                         display_name: displayName
-                        // SOCP: Only allowed meta fields are display_name, pronouns, age, avatar_url, extras
-                        // No picture upload - avatar_url would be a URL string if provided
                     }
                 },
                 config
             );
+            
+            // Store the decrypted private key temporarily in localStorage for immediate use
+            // In production, you'd decrypt it only when needed and store in memory
+            const userInfo = {
+                ...data.user,
+                privateKey: keyPair.privateKey  // Store decrypted private key temporarily
+            };
             
             toast({
                 title: "Registration Successful!",
@@ -80,11 +92,12 @@ const Signup = () => {
                 position: "bottom",
             });
 
-            localStorage.setItem('userInfo', JSON.stringify(data));
+            localStorage.setItem('userInfo', JSON.stringify(userInfo));
             setLoading(false);
             history.push("/chats")
         }
         catch (error) {
+            console.error("❌ Registration error:", error);
             toast({
                 title: "Error Occurred!",
                 description: error.response?.data?.message || "Registration failed",
@@ -108,7 +121,7 @@ const Signup = () => {
                     User ID
                 </FormLabel>
                 <Input
-                    placeholder='Enter your User ID (UUID format recommended)'
+                    placeholder='Enter your User ID'
                     onChange={(e) => setUserId(e.target.value)}
                     value={userId}
                 />

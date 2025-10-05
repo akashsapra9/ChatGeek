@@ -66,4 +66,49 @@ const getUserPublicKey = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, getUserPublicKey };
+const loginUser = async (req, res) => {
+  try {
+    const { user_id, password } = req.body;
+    console.log("Login attempt for user:", user_id);
+
+    // Find user
+    const user = await User.findOne({ user_id });
+    if (!user) {
+      console.log("User not found:", user_id);
+      return res.status(404).json({ error: 'USER_NOT_FOUND' });
+    }
+
+    console.log("User found:", user_id);
+    console.log("User data:", {
+      hasPubkey: !!user.pubkey,
+      hasPrivkeyStore: !!user.privkey_store,
+      hasPakePassword: !!user.pake_password
+    });
+
+    // TEMPORARY: For testing, we'll skip proper PAKE verification
+    // In production, you'd implement proper PAKE verification here
+    console.log("PAKE verification skipped for testing");
+
+    // Return user data needed for frontend
+    res.json({
+      success: true,
+      user: {
+        user_id: user.user_id,
+        pubkey: user.pubkey,
+        privkey_store: user.privkey_store, // The encrypted private key
+        meta: user.meta
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'LOGIN_FAILED', details: error.message });
+  }
+};
+
+// Make sure you export loginUser along with your other functions
+module.exports = { 
+  registerUser, 
+  getUserPublicKey, 
+  loginUser
+};
