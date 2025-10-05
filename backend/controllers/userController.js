@@ -4,18 +4,18 @@ const GroupMember = require("../models/groupMemberModel");
 
 const registerUser = async (req, res) => {
   try {
-    const { user_id, pubkey, privkey_store, pake_password, meta } = req.body;
-    console.log("Registration attempt:", req.body);
-    // Check if user already exists
-    const existingUser = await User.findOne({ user_id });
+    const { user_id, login_email, pubkey, privkey_store, pake_password, meta } =
+      req.body;
+
+    const existingUser = await User.findOne({ login_email });
     if (existingUser) {
-      return res.status(400).json({ error: "NAME_IN_USE" });
+      return res.status(400).json({ error: "EMAIL_IN_USE" });
     }
-    console.log("No existing user found with user_id:", user_id);
 
     // Create new user
     const user = await User.create({
       user_id,
+      login_email,
       pubkey,
       privkey_store,
       pake_password,
@@ -71,11 +71,8 @@ const getUserPublicKey = async (req, res) => {
 
 const loginUser = async (req, res) => {
   try {
-    const { user_id, password } = req.body;
-    console.log("Login attempt for user:", user_id);
-
-    // Find user
-    const user = await User.findOne({ user_id });
+    const { login_email, password } = req.body;
+    const user = await User.findOne({ login_email });
     if (!user) {
       console.log("User not found:", user_id);
       return res.status(404).json({ error: "USER_NOT_FOUND" });
@@ -108,9 +105,34 @@ const loginUser = async (req, res) => {
   }
 };
 
-// Make sure you export loginUser along with your other functions
+const searchUsers = async (req, res) => {
+  try {
+    const keyword = req.query.search
+      ? {
+          $or: [
+            {
+              "meta.display_name": { $regex: req.query.search, $options: "i" },
+            },
+            { login_email: { $regex: req.query.search, $options: "i" } },
+          ],
+        }
+      : {};
+
+    // Exclude yourself from results
+    const users = await User.find(keyword)
+      .find({ user_id: { $ne: req.user?.user_id } })
+      .select("-privkey_store -pake_password");
+
+    res.json(users);
+  } catch (error) {
+    console.error("[SOCP][searchUsers] error:", error);
+    res.status(500).json({ error: "SEARCH_FAILED" });
+  }
+};
+
 module.exports = {
   registerUser,
   getUserPublicKey,
   loginUser,
+  searchUsers,
 };

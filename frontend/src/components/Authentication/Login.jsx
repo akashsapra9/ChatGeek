@@ -1,162 +1,156 @@
-import React from 'react'
-import { Button, FormControl, FormLabel, Input, InputGroup, InputRightElement, VStack, useToast } from '@chakra-ui/react';
-import { useState } from 'react';
-import axios from 'axios';
-import { useHistory } from 'react-router-dom/cjs/react-router-dom.min';
-import { CryptoUtils } from '../../utils/cryptoUtils';
+import React, { useState } from "react";
+import {
+  Button,
+  FormControl,
+  FormLabel,
+  Input,
+  InputGroup,
+  InputRightElement,
+  VStack,
+  useToast,
+} from "@chakra-ui/react";
+import axios from "axios";
+import { useHistory } from "react-router-dom/cjs/react-router-dom.min";
+import { CryptoUtils } from "../../utils/cryptoUtils";
 import { ChatState } from "../../Context/chatProvider";
 
 const Login = () => {
-    
-    const [show, setShow] = useState(false)
-    const [userId, setUserId] = useState()
-    const [password, setPassword] = useState()
-    const [loading, setLoading] = useState(false)
-    const toast = useToast();
-    const history = useHistory();
+  const [show, setShow] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const toast = useToast();
+  const history = useHistory();
 
-    const { setUser, setPrivateKey } = ChatState(); // ✅ access context
-    
-    const handleClick = () => setShow(!show);
-    
-    const submitHandler = async() => { 
-        setLoading(true);
-        console.log("[DEBUG][chatProvider.jsx] Login started for user id:", userId);
-        
-        if (!userId || !password) {
-            toast({
-              title: "Please fill all the fields!",
-              status: "warning",
-              duration: 5000,
-              isClosable: true,
-              position: "bottom",
-            });
-            setLoading(false);
-            return;
-          }
-        
-        try {
-            const config = {
-                headers: {
-                    "Content-type": "application/json"
-                },
-            };
-            
-            console.log("1. Sending login request to backend...");
-            
-            //STEP 1. Login request to backend. Backend will Backend verifies credentials matches PAKE verifier or password
-            // First, get user data including encrypted private key
-            const { data } = await axios.post("/api/user/login",
-            { user_id: userId, password },
-            config
-            );
+  const { setUser, setPrivateKey } = ChatState();
 
-            console.log("2. Backend response:", data);
+  const handleClick = () => setShow(!show);
 
-            if (!data.success) {
-                throw new Error(data.error || "Login failed");
-            }
+  const submitHandler = async () => {
+    setLoading(true);
+    console.log("[DEBUG][Login.jsx] Login started for email:", loginEmail);
 
-            console.log("3. User data received, encrypted private key length:", data.user.privkey_store?.length);
-            console.log("4. Attempting to decrypt private key...");
-
-            // STEP 2. Decrypt private key with password locally
-            // Decrypt the private key with the password
-            const decryptedPrivateKey = CryptoUtils.decryptPrivateKey(
-                data.user.privkey_store, 
-                password
-            );
-
-            console.log("5. Private key decrypted successfully");
-
-            // TODO: is there a better way to validate?
-            if (!decryptedPrivateKey.includes('BEGIN RSA PRIVATE KEY')) {
-                console.warn("⚠️ Decrypted key doesn't look like a valid RSA private key");
-            }
-
-            // ✅ store decrypted key only in memory
-            setPrivateKey(decryptedPrivateKey);
-
-
-            // ✅ store non-sensitive info only in localStorage
-            localStorage.setItem("userInfo", JSON.stringify(data.user));
-            setUser(data.user);
-
-            toast({
-                title: "Login Successful!",
-                status: "success",
-                duration: 5000,
-                isClosable: true,
-                position: "bottom",
-            });
-
-            setLoading(false);
-            history.push("/chats");
-            
-        } catch(error) {
-            console.error("❌ Login error details:", error);
-            console.error("❌ Error response:", error.response?.data);
-            
-            let errorMessage = "Login failed";
-            if (error.response?.data?.error) {
-                errorMessage = error.response.data.error;
-            } else if (error.message) {
-                errorMessage = error.message;
-            }
-            
-            toast({
-                title: "Error Occurred!",
-                description: errorMessage,
-                status: "error",
-                duration: 5000,
-                isClosable: true,
-                position: "bottom",
-            });
-            setLoading(false);
-        }
+    if (!loginEmail || !password) {
+      toast({
+        title: "Please fill all the fields!",
+        status: "warning",
+        duration: 5000,
+        isClosable: true,
+        position: "bottom",
+      });
+      setLoading(false);
+      return;
     }
 
-    return (
-        <VStack spacing={'5px'} color={"black"}>
+    try {
+      const config = {
+        headers: {
+          "Content-type": "application/json",
+        },
+      };
 
-        <FormControl id='userId' isRequired>
-            <FormLabel>User ID</FormLabel>
-            <Input
-                placeholder='Enter your User ID'
-                onChange={(e) => setUserId(e.target.value)}
-                value={userId}
-            />
-        </FormControl>
+      console.log("1️⃣ Sending login request to backend...");
+      const { data } = await axios.post(
+        "/api/user/login",
+        { login_email: loginEmail, password },
+        config
+      );
 
-        <FormControl id='password' isRequired>
-            <FormLabel>Password</FormLabel>
-            <InputGroup>
-                <Input
-                    type={show ? "text" : "password"}
-                    placeholder='Enter your password'
-                    onChange={(e) => setPassword(e.target.value)}
-                    value={password}
-                />
-                <InputRightElement width={"4.5rem"}>
-                    <Button h={"1.5rem"} w={"3rem"} size={"sm"} onClick={handleClick}>
-                        {show ? "Hide" : "Show"}
-                    </Button>
-                </InputRightElement>
-            </InputGroup>
-        </FormControl>
+      console.log("2️⃣ Backend response:", data);
 
-        <Button
-            colorScheme='blue'
-            w={"100%"}
-            style={{ marginTop: 15 }}
-            onClick={submitHandler}
-            isLoading={loading}
-        >
-            Login
-        </Button>
+      if (!data.success) {
+        throw new Error(data.error || "Login failed");
+      }
 
-        </VStack>
-    )
-}
+      console.log(
+        "3️⃣ Encrypted private key length:",
+        data.user.privkey_store?.length
+      );
+
+      // Decrypt private key with password
+      const decryptedPrivateKey = CryptoUtils.decryptPrivateKey(
+        data.user.privkey_store,
+        password
+      );
+      console.log("4️⃣ Private key decrypted successfully");
+
+      if (!decryptedPrivateKey.includes("BEGIN RSA PRIVATE KEY")) {
+        console.warn("⚠️ Decrypted key doesn't look like a valid RSA private key");
+      }
+
+      // ✅ store decrypted key only in memory
+      setPrivateKey(decryptedPrivateKey);
+
+      // ✅ store non-sensitive info only in localStorage
+      localStorage.setItem("userInfo", JSON.stringify(data.user));
+      setUser(data.user);
+
+      toast({
+        title: "Login Successful!",
+        status: "success",
+        duration: 5000,
+        isClosable: true,
+        position: "bottom",
+      });
+
+      setLoading(false);
+      history.push("/chats");
+    } catch (error) {
+      console.error("❌ Login error:", error);
+      const msg =
+        error.response?.data?.error || error.message || "Login failed";
+
+      toast({
+        title: "Error Occurred!",
+        description: msg,
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+        position: "bottom",
+      });
+      setLoading(false);
+    }
+  };
+
+  return (
+    <VStack spacing="5px" color="black">
+      <FormControl id="loginEmail" isRequired>
+        <FormLabel>Email</FormLabel>
+        <Input
+          placeholder="Enter your email"
+          onChange={(e) => setLoginEmail(e.target.value)}
+          value={loginEmail}
+        />
+      </FormControl>
+
+      <FormControl id="password" isRequired>
+        <FormLabel>Password</FormLabel>
+        <InputGroup>
+          <Input
+            type={show ? "text" : "password"}
+            placeholder="Enter your password"
+            onChange={(e) => setPassword(e.target.value)}
+            value={password}
+          />
+          <InputRightElement width="4.5rem">
+            <Button h="1.5rem" w="3rem" size="sm" onClick={handleClick}>
+              {show ? "Hide" : "Show"}
+            </Button>
+          </InputRightElement>
+        </InputGroup>
+      </FormControl>
+
+      <Button
+        colorScheme="blue"
+        w="100%"
+        mt={4}
+        onClick={submitHandler}
+        isLoading={loading}
+      >
+        Login
+      </Button>
+    </VStack>
+  );
+};
 
 export default Login;

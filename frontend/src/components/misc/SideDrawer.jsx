@@ -51,7 +51,8 @@ const SideDrawer = () => {
                 }
             }
 
-            const { data } = await axios.get(`/api/user?search=${search}`, config)
+            const { data } = await axios.get(`/api/user/search?search=${search}`, config);
+
 
             setLoading(false)
             setSearchResults(data);
