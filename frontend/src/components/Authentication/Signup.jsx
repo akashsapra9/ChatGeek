@@ -79,6 +79,7 @@ const Signup = () => {
                 },
                 config
             );
+            console.log("✅ Registration response received from backend:", data);
             
             // ✅ Store user info (only encrypted key)
             localStorage.setItem("userInfo", JSON.stringify(data.user));

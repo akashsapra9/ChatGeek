@@ -209,8 +209,8 @@ const io = require("socket.io")(server, {
   pingTimeout: 60000,
   cors: {
     origin: [
-      "http://localhost:3000",
-      "http://localhost:3001",
+      "htp://localhttp://localhost:3000",
+      "htp://localhttp://localhost:3001",
       "http://localhost:3002",
     ],
   },

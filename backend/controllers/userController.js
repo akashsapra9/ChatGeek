@@ -1,16 +1,17 @@
-const User = require('../models/userModel');
-const Group = require('../models/groupModel');
-const GroupMember = require('../models/groupMemberModel');
+const User = require("../models/userModel");
+const Group = require("../models/groupModel");
+const GroupMember = require("../models/groupMemberModel");
 
 const registerUser = async (req, res) => {
   try {
     const { user_id, pubkey, privkey_store, pake_password, meta } = req.body;
-
+    console.log("Registration attempt:", req.body);
     // Check if user already exists
     const existingUser = await User.findOne({ user_id });
     if (existingUser) {
-      return res.status(400).json({ error: 'NAME_IN_USE' });
+      return res.status(400).json({ error: "NAME_IN_USE" });
     }
+    console.log("No existing user found with user_id:", user_id);
 
     // Create new user
     const user = await User.create({
@@ -19,50 +20,52 @@ const registerUser = async (req, res) => {
       privkey_store,
       pake_password,
       meta: meta || {},
-      version: 1
+      version: 1,
     });
+    console.log("User created:", user);
 
     // Add user to public channel
     const publicGroup = await Group.findOne({ group_id: "public" });
     if (publicGroup) {
+      console.log("Adding user to public channel");
       // in real implementation, encrypt the group key with the user's public key
       const wrappedKey = "placeholder_wrapped_key"; // Replace with actual RSA-OAEP encryption
-      
+
       await GroupMember.create({
         group_id: "public",
         member_id: user_id,
         role: "member",
-        wrapped_key: wrappedKey
+        wrapped_key: wrappedKey,
       });
     }
+    console.log("User added to public channel");
 
     res.status(201).json({
       success: true,
       user: {
         user_id: user.user_id,
         pubkey: user.pubkey,
-        meta: user.meta
-      }
+        meta: user.meta,
+      },
     });
-
   } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ error: 'REGISTRATION_FAILED' });
+    console.error("Registration error:", error);
+    res.status(500).json({ error: "REGISTRATION_FAILED" });
   }
 };
 
 const getUserPublicKey = async (req, res) => {
   try {
     const { user_id } = req.params;
-    
-    const user = await User.findOne({ user_id }, 'pubkey user_id');
+
+    const user = await User.findOne({ user_id }, "pubkey user_id");
     if (!user) {
-      return res.status(404).json({ error: 'USER_NOT_FOUND' });
+      return res.status(404).json({ error: "USER_NOT_FOUND" });
     }
 
     res.json({ pubkey: user.pubkey });
   } catch (error) {
-    res.status(500).json({ error: 'KEY_RETRIEVAL_FAILED' });
+    res.status(500).json({ error: "KEY_RETRIEVAL_FAILED" });
   }
 };
 
@@ -75,14 +78,14 @@ const loginUser = async (req, res) => {
     const user = await User.findOne({ user_id });
     if (!user) {
       console.log("User not found:", user_id);
-      return res.status(404).json({ error: 'USER_NOT_FOUND' });
+      return res.status(404).json({ error: "USER_NOT_FOUND" });
     }
 
     console.log("User found:", user_id);
     console.log("User data:", {
       hasPubkey: !!user.pubkey,
       hasPrivkeyStore: !!user.privkey_store,
-      hasPakePassword: !!user.pake_password
+      hasPakePassword: !!user.pake_password,
     });
 
     // TEMPORARY: For testing, we'll skip proper PAKE verification
@@ -96,19 +99,18 @@ const loginUser = async (req, res) => {
         user_id: user.user_id,
         pubkey: user.pubkey,
         privkey_store: user.privkey_store, // The encrypted private key
-        meta: user.meta
-      }
+        meta: user.meta,
+      },
     });
-
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'LOGIN_FAILED', details: error.message });
+    console.error("Login error:", error);
+    res.status(500).json({ error: "LOGIN_FAILED", details: error.message });
   }
 };
 
 // Make sure you export loginUser along with your other functions
-module.exports = { 
-  registerUser, 
-  getUserPublicKey, 
-  loginUser
+module.exports = {
+  registerUser,
+  getUserPublicKey,
+  loginUser,
 };

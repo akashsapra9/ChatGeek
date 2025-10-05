@@ -1,311 +1,702 @@
-import React, { useEffect, useState } from 'react'
-import { ChatState } from '../Context/chatProvider'
-import { Box, FormControl, IconButton, Input, Spinner, Text, useToast } from '@chakra-ui/react';
-import { ArrowBackIcon } from '@chakra-ui/icons';
-import { getSender, getSenderFull } from '../config/chatlogics';
-import ProfileModel from './misc/profileModel';
-import UpdateGroupChatModal from './misc/UpdateGroupChatModal';
-import axios from 'axios';
-import ScrollableChat from './ScrollableChat';
-import io from 'socket.io-client'
-import './styles.css'
-import { encryptMessage, decryptMessage, signMessage, verifyMessage } from "../utils/crypto";
+import React, { useEffect, useState, useRef } from "react";
+import { ChatState } from "../Context/chatProvider";
+import {
+  Box,
+  FormControl,
+  IconButton,
+  Input,
+  Spinner,
+  Text,
+  useToast,
+  InputGroup,
+  InputRightElement,
+  Button,
+} from "@chakra-ui/react";
+import { ArrowBackIcon } from "@chakra-ui/icons";
+import { getSender, getSenderFull } from "../config/chatlogics";
+import ProfileModel from "./misc/profileModel";
+import UpdateGroupChatModal from "./misc/UpdateGroupChatModal";
+import axios from "axios";
+import ScrollableChat from "./ScrollableChat";
+import io from "socket.io-client";
+import "./styles.css";
+
+import {
+  encryptMessage,
+  decryptMessage,
+  signMessage,
+  verifyMessage,
+} from "../utils/crypto";
+import { streamFileTransfer, FileReceiver } from "../utils/fileTransfer";
 
 const ENDPOINT = "http://localhost:5001";
 // eslint-disable-next-line
 var socket, selectedChatCompare;
 
 
-const SingleChat = ({ fetchAgain, setFetchAgain }) => {
-    const [messages, setMessages] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [newMessage, setNewMessage] = useState()
-    const [socketConnected, setSocketConnected] = useState(false);
-    const [typing, setTyping] = useState(false);
-    const [istyping, setIsTyping] = useState(false);
-    const toast = useToast();
+/* ------------------------------------------------------------------
+   Helper: build sign-data per spec
+   DM (original MSG_DIRECT): ciphertext|from|to|ts
+   Public (original MSG_PUBLIC_CHANNEL): ciphertext|from|ts
+   NOTE: when we only have USER_DELIVER history, we may not know
+   original type. We'll try DM-style first; if verify fails, try public-style.
+------------------------------------------------------------------- */
+const signDataDM = (ciphertext, from, to, ts) => `${ciphertext}${from}${to}${ts}`;
+const signDataPublic = (ciphertext, from, ts) => `${ciphertext}${from}${ts}`;
 
-    const { selectedChat, setSelectedChat, user, notification, setNotification } = ChatState();
-    // Debug: print the attributes of user object
-    console.log("[DBG] User object:", user);
-    // Debug: print the attributes of selectedChat object
-    console.log("[DBG] SelectedChat object:", selectedChat);
-    
-    const fetchMessages = async () => {
-        if (!selectedChat) return;
+/* ------------------------------------------------------------------
+   Normalize + decrypt/verify a single USER_DELIVER frame
+   - Bypass when sender_pub is null or content_sig === "BYPASS_SIG"
+   - Otherwise decrypt with my private key and verify with sender_pub
+------------------------------------------------------------------- */
+const normalizeDeliveredFrame = async (frame, myPrivKey) => {
+  const { payload } = frame || {};
+  if (!payload) return { ...frame, plaintext: "[invalid payload]" };
+
+  const { ciphertext, sender, sender_pub, content_sig } = payload;
+
+  // Real crypto path
+  try {
+    const plaintext = await decryptMessage(ciphertext, myPrivKey);
+
+    // Try DM verify first (includes 'to'); if fails, try public
+    let ok = false;
+    try {
+      ok = await verifyMessage(
+        signDataDM(ciphertext, frame.from, frame.to, frame.ts),
+        content_sig,
+        sender_pub
+      );
+    } catch (_) {/* ignore */}
+
+    if (!ok) {
+      try {
+        ok = await verifyMessage(
+          signDataPublic(ciphertext, frame.from, frame.ts),
+          content_sig,
+          sender_pub
+        );
+      } catch (_) {/* ignore */}
+    }
+
+    return { ...frame, plaintext: ok ? plaintext : "[invalid signature]", sender };
+  } catch (err) {
+    console.error("[SOCP] [normalizeDeliveredFrame] Decrypt failed:", err);
+    return { ...frame, plaintext: "[normalizeDeliveredFrame] [decryption failed]", sender };
+  }
+};
+
+const SingleChat = ({ fetchAgain, setFetchAgain }) => {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [newMessage, setNewMessage] = useState("");
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [istyping, setIsTyping] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const fileInputRef = useRef(null);
+  const toast = useToast();
+
+  const {
+    selectedChat,
+    setSelectedChat,
+    user,
+    privateKey,
+  } = ChatState(); //TODO: SECRURITY RISKS: is saving privateKey like this safe?
+  const myPrivKey = privateKey;
+  const myPubKey = user?.pubkey;
+  if (!myPrivKey) {
+    console.error("[SOCP][SingleChat.jsx] ❌ Missing private key – aborting");
+  }
+  if (!myPubKey) {
+    console.error("[SOCP][SingleChat.jsx] ❌ Missing public key – aborting");
+  }
+
+  const isDM = selectedChat && !selectedChat.isGroupChat && !selectedChat.isCommunity;
+  const isGroup = selectedChat && selectedChat.isGroupChat;
+  const isCommunity = selectedChat && selectedChat.isCommunity;
+
+  /* ------------------------------------------------------------------
+     Fetch chat history (messages + optional files)
+     Expects array of USER_DELIVER frames for messages.
+     (If/when you add a file-history endpoint, merge it here.)
+  ------------------------------------------------------------------- */
+  const fetchMessages = async () => {
+    if (!selectedChat) return;
+
+    try {
+      const config = { headers: { Authorization: `Bearer ${user.token}` } };
+      setLoading(true);
+
+      // NEW: history returns a list of USER_DELIVER frames
+      const { data: frames } = await axios.get(
+        `/api/message/${selectedChat._id}`,
+        config
+      );
+
+      // Decrypt/verify (or bypass) every frame in history
+      const normalized = await Promise.all(
+        (frames || []).map((f) => normalizeDeliveredFrame(f, myPrivKey))
+      );
+
+      // If you add /api/file/history/:chatId later, fetch it and push entries like:
+      // normalized.push({ type: "FILE", name, url, plaintext: `[File: ${name}]` })
+
+      setMessages(normalized);
+      setLoading(false);
+
+      // Join room for realtime updates
+      socket.emit("join chat", selectedChat._id);
+    } catch (error) {
+      console.error("[SOCP] fetchMessages error:", error);
+      setLoading(false);
+      toast({
+        title: "Error Occurred",
+        description: "Failed to load messages",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+        position: "bottom",
+      });
+    }
+  };
+
+  /* ------------------------------------------------------------------
+     Send text message (build MSG_DIRECT or MSG_PUBLIC_CHANNEL)
+     If missing keys → bypass (plaintext + BYPASS_SIG)
+  ------------------------------------------------------------------- */
+  const sendMessage = async (event) => {
+    if (event.key !== "Enter" || !newMessage) return;
+  
+    try {
+      const config = {
+        headers: {
+          "Content-type": "application/json",
+          Authorization: `Bearer ${user.token}`,
+        },
+      };
+  
+      const ts = Date.now();
+      const from = user._id;
+      const plaintext = newMessage;
+  
+      // --- For DM ---
+      if (isDM) {
+        console.log("[SOCP][sendMessage] Preparing DM message");
+        const dmRecipient = selectedChat.users.find((u) => u._id !== user._id);
+        const to = dmRecipient._id;
+        const recipientPub = dmRecipient?.pubkey;
+        if (!recipientPub) {
+          console.error(`[SOCP][sendMessage] ❌ Recipient ${dmRecipient?._id} has no pubkey – aborting`);
+          return;
+        }
+        console.log("[SOCP][sendMessage] Encrypting message for recipient:", to);
+        const ciphertext = await encryptMessage(plaintext, recipientPub);
+        console.log("[SOCP][sendMessage] Encryption done, signing message");
+        const toSign = signDataDM(ciphertext, from, to, ts);
+        const content_sig = await signMessage(toSign, myPrivKey);
+        
+        console.log("[SOCP][sendMessage] DM encryption and signing done");
+        const frame = {
+          type: "MSG_DIRECT",
+          from,
+          to,
+          ts,
+          payload: { ciphertext, sender_pub: myPubKey, content_sig },
+          sig: "",
+        };
+  
+        setNewMessage("");
+        console.log("[SOCP][sendMessage] Outgoing DM frame:", frame);
+  
+        const { data } = await axios.post("/api/message", frame, config);
+        socket.emit("new message", data);
+        setMessages((prev) => [...prev, { ...data, plaintext }]);
+        return;
+      }
+  
+      // --- For GROUP ---
+      if (isGroup) {
+        const to = selectedChat._id;
+        const members = selectedChat.users.filter((u) => u._id !== user._id);
+  
+        for (const member of members) {
+        const recipientPub = member?.pubkey;
+        if (!recipientPub) {
+            console.error(`[SOCP][sendMessage] ❌ Member ${member._id} has no pubkey – skipping`);
+            continue;
+        }
+          const ciphertext = await encryptMessage(plaintext, recipientPub);
+          const toSign = signDataPublic(ciphertext, from, ts);
+          const content_sig = await signMessage(toSign, myPrivKey);
+  
+          const frame = {
+            type: "MSG_PUBLIC_CHANNEL",
+            from,
+            to,
+            ts,
+            payload: { ciphertext, sender_pub: myPubKey, content_sig },
+            sig: "",
+          };
+  
+          console.log("[SOCP][sendMessage] Outgoing group frame for", member._id, ":", frame);
+          await axios.post("/api/message", frame, config);
+          socket.emit("new message", frame);
+        }
+  
+        setNewMessage("");
+        setMessages((prev) => [...prev, { plaintext, from, to, ts, type: "MSG_PUBLIC_CHANNEL" }]);
+        return;
+      }
+  
+      // --- Community (unsupported) ---
+      toast({
+        title: "Unsupported Chat Type",
+        description: "Community chats are disabled in this version.",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+        position: "bottom",
+      });
+    } catch (err) {
+      console.error("[SOCP][sendMessage] error:", err);
+      toast({
+        title: "Error Occurred",
+        description: "Failed to send message",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+        position: "bottom",
+      });
+    }
+  };
+  
+
+  /* ------------------------------------------------------------------
+     Send file (stream). If missing recipient pubkey → we still try
+     to encrypt to self (fallback) OR you could bypass, but chunk
+     bypass complicates reassembly; keep encryption if possible.
+  ------------------------------------------------------------------- */
+  const sendFile = async () => {
+    if (!selectedFile) {
+      console.warn("[SOCP][sendFile] No file selected — exiting early");
+      return;
+    }
+  
+    console.log("[SOCP][sendFile] Starting file send process...");
+    console.log("[SOCP][sendFile] selectedFile:", selectedFile);
+  
+    try {
+      const chatId = selectedChat?._id;
+      const mode = isDM ? "dm" : "public";
+      if (!myPrivKey || !myPubKey) {
+        console.error("[SOCP][sendFile] ❌ Missing keypair – aborting file send");
+        return;
+      }
+      const from = user._id;
+  
+      console.log("[SOCP][sendFile] chatId:", chatId);
+      console.log("[SOCP][sendFile] mode:", mode);
+      console.log("[SOCP][sendFile] sender (from):", from);
+  
+      const config = {
+        headers: {
+          "Content-type": "application/json",
+          Authorization: `Bearer ${user.token}`,
+        },
+      };
+  
+      // --- For Direct Messages ---
+      if (isDM) {
+        console.log("[SOCP][sendFile] Mode: Direct Message");
+        const dmRecipient = selectedChat.users.find((u) => u._id !== user._id);
+        console.log("[SOCP][sendFile] dmRecipient:", dmRecipient);
+  
+        const recipientPub = dmRecipient?.pubkey;
+        if (!recipientPub) {
+          console.error(`[SOCP][sendMessage] ❌ Recipient ${dmRecipient?._id} has no pubkey – aborting`);
+          return;
+        }
 
         try {
-            const config = {
-                headers: {
-                    Authorization: `Bearer ${user.token}`,
-                },
-            };
-
-            setLoading(true);
-
-            const { data } = await axios.get(
-                `/api/message/${selectedChat._id}`,
-                config
-            );
-
-            const myPrivKey = localStorage.getItem("my_privkey");
-
-            const decrypted = await Promise.all(
-            data.map(async (m) => {
-                try {
-                // verify signature with sender’s pubkey
-                const ok = await verifyMessage(m.ciphertext, m.content_sig, m.sender.pubkey);
-                if (!ok) return { ...m, plaintext: "[invalid signature]" };
-
-                // decrypt with my private key
-                const plain = await decryptMessage(m.ciphertext, myPrivKey);
-                return { ...m, plaintext: plain };
-                } catch {
-                return { ...m, plaintext: "[decryption failed]" };
-                }
-            })
-            );
-
-            setMessages(decrypted);
-            setLoading(false);
-
-            socket.emit("join chat", selectedChat._id);
-
-        } catch (error) {
-            toast({
-                title: "Error Occured!",
-                description: "Failed to Load the Messages",
-                status: "error",
-                duration: 5000,
-                isClosable: true,
-                position: "bottom",
-            });
+          for await (const frame of streamFileTransfer(
+            selectedFile,
+            mode,
+            chatId,
+            from,
+            recipientPub
+          )) {
+            console.log("[SOCP][sendFile] Prepared frame:", frame);
+  
+            const endpoint = `/api/file/${frame.type.split("_")[1].toLowerCase()}`;
+            console.log("[SOCP][sendFile] → POST", endpoint);
+  
+            const res = await axios.post(endpoint, frame, config);
+            console.log("[SOCP][sendFile] ✔️ Frame sent successfully. Server response:", res.status);
+  
+            socket.emit("file send", frame);
+            console.log("[SOCP][sendFile] 📡 Emitted 'file send' socket event");
+          }
+        } catch (innerErr) {
+          console.error("[SOCP][sendFile] ❌ Error inside stream loop (DM):", innerErr);
+          throw innerErr;
         }
+
+    // ✅ Add local message just like sendMessage()
+    const fileUrl = URL.createObjectURL(selectedFile);
+    const newFileMsg = {
+      type: "FILE",
+      name: selectedFile.name,
+      url: fileUrl,
+      plaintext: `[File: ${selectedFile.name}]`,
+      from: user._id,
+      to: dmRecipient._id,
+      ts: Date.now(),
     };
 
-    const sendMessage = async (event) => {
-        if (event.key === "Enter" && newMessage) {
-            try {
-                const config = {
-                    headers: {
-                        "Content-type": "application/json",
-                        Authorization: `Bearer ${user.token}`,
-                    },
-                };
-                setNewMessage("");
-                const myPrivKey = localStorage.getItem("my_privkey");
+    setMessages((prev) => [...prev, newFileMsg]);
+    socket.emit("new message", newFileMsg); // ✅ mirror to receiver
+    console.log("[SOCP][sendFile] 📎 File message emitted via 'new message' socket event");
 
-                // pick first recipient (for group chat, loop later)
-                const recipient = selectedChat.users.find(u => u._id !== user._id);
-
-                const ciphertext = await encryptMessage(newMessage, recipient.pubkey);
-                const signature = await signMessage(ciphertext, myPrivKey);
-
-                const { data } = await axios.post(
-                "/api/message",
-                {
-                    ciphertext,
-                    content_sig: signature,
-                    chatId: selectedChat._id,
-                },
-                config
-                );
-
-                socket.emit("new message", data);
-                setMessages([...messages, { ...data, plaintext: newMessage }]);
-            } catch (error) {
-                toast({
-                    title: "Error Occured!",
-                    description: "Failed to send the Message",
-                    status: "error",
-                    duration: 5000,
-                    isClosable: true,
-                    position: "bottom",
-                });
-            }
-        }
-    };
-
-    useEffect(() => {
-        socket = io(ENDPOINT);
-        socket.emit("setup", user);
-        socket.on("connected", () => setSocketConnected(true));
-        socket.on("typing", () => setIsTyping(true));
-        socket.on("stop typing", () => setIsTyping(false));
-
-        // eslint-disable-next-line
-    }, []);
-
-    useEffect(() => {
-        fetchMessages();
-        selectedChatCompare = selectedChat;
-        // eslint-disable-next-line
-    }, [selectedChat]);
-
-    useEffect(() => {
-        socket.on("message recieved", async (newMessageRecieved) => {
-            const myPrivKey = localStorage.getItem("my_privkey");
-
-            let decrypted;
-            try {
-            const ok = await verifyMessage(
-                newMessageRecieved.ciphertext,
-                newMessageRecieved.content_sig,
-                newMessageRecieved.sender.pubkey
-            );
-            if (!ok) {
-                decrypted = { ...newMessageRecieved, plaintext: "[invalid signature]" };
-            } else {
-                const plain = await decryptMessage(newMessageRecieved.ciphertext, myPrivKey);
-                decrypted = { ...newMessageRecieved, plaintext: plain };
-            }
-            } catch {
-            decrypted = { ...newMessageRecieved, plaintext: "[decryption failed]" };
-            }
-
-            if (
-            !selectedChatCompare ||
-            selectedChatCompare._id !== decrypted.chat._id
-            ) {
-            if (!notification.includes(decrypted)) {
-                setNotification([decrypted, ...notification]);
-                setFetchAgain(!fetchAgain);
-            }
-            } else {
-            setMessages([...messages, decrypted]);
-            }
+  
+        toast({
+          title: "File sent successfully!",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
         });
-    });
-
-
-    const typingHandler = (e) => {
-        setNewMessage(e.target.value);
-
-        if (!socketConnected) return;
-
-        if (!typing) {
-            setTyping(true);
-            socket.emit("typing", selectedChat._id);
-        }
-        let lastTypingTime = new Date().getTime();
-        var timerLength = 3000;
-        setTimeout(() => {
-            var timeNow = new Date().getTime();
-            var timeDiff = timeNow - lastTypingTime;
-            if (timeDiff >= timerLength && typing) {
-                socket.emit("stop typing", selectedChat._id);
-                setTyping(false);
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ""; // ✅ Reset native file input value
+          }
+        console.log("[SOCP][sendFile] File cleared from UI after send");
+        return;
+      }
+  
+      // --- For Group Chats (SOCP fan-out) ---
+      if (isGroup) {
+        console.log("[SOCP][sendFile] Mode: Group Chat");
+        const members = selectedChat.users.filter((u) => u._id !== user._id);
+        console.log("[SOCP][sendFile] members:", members.map((m) => m._id));
+  
+        try {
+          for (const member of members) {
+            const recipientPub = member?.pubkey;
+            if (!recipientPub) {
+            console.error(`[SOCP][sendMessage] ❌ Recipient ${member?._id} has no pubkey – aborting`);
+            return;
             }
-        }, timerLength);
+            console.log(`[SOCP][sendFile] Encrypting for member ${member._id}, pubkey starts:`, recipientPub?.slice(0, 80) + "...");
+  
+            for await (const frame of streamFileTransfer(
+              selectedFile,
+              mode,
+              chatId,
+              from,
+              recipientPub
+            )) {
+              console.log(`[SOCP][sendFile] Prepared frame for member ${member._id}:`, frame);
+  
+              const endpoint = `/api/file/${frame.type.split("_")[1].toLowerCase()}`;
+              console.log("[SOCP][sendFile] → POST", endpoint);
+  
+              const res = await axios.post(endpoint, frame, config);
+              console.log(`[SOCP][sendFile] ✔️ Frame sent for ${member._id}. Server response:`, res.status);
+  
+              socket.emit("file send", frame);
+              console.log(`[SOCP][sendFile] 📡 Emitted 'file send' for ${member._id}`);
+            }
+          }
+        } catch (innerErr) {
+          console.error("[SOCP][sendFile] ❌ Error inside stream loop (Group):", innerErr);
+          throw innerErr;
+        }
+
+        const fileUrl = URL.createObjectURL(selectedFile);
+        const newFileMsg = {
+            type: "FILE",
+            name: selectedFile.name,
+            url: fileUrl,
+            plaintext: `[File: ${selectedFile.name}]`,
+            from: user._id,
+            to: selectedChat._id,
+            ts: Date.now(),
+        };
+
+        setMessages((prev) => [...prev, newFileMsg]);
+        socket.emit("new message", newFileMsg);
+        console.log("[SOCP][sendFile] 📎 File message broadcast via 'new message' socket event (group)");
+
+  
+        toast({
+          title: "File sent to group successfully!",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
+        setSelectedFile(null);
+        console.log("[SOCP][sendFile] File cleared from UI after group send");
+        return;
+      }
+  
+      // --- Unsupported Chat Type ---
+      console.warn("[SOCP][sendFile] Unsupported chat type");
+      toast({
+        title: "Unsupported Chat Type",
+        description: "Community file transfer not supported.",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    } catch (error) {
+      console.error("[SOCP][sendFile] ❌ Top-level sendFile error:", error);
+      toast({
+        title: "File send failed",
+        description: error?.message || "Unknown error",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
+  };
+  
+
+  /* ------------------------------------------------------------------
+     Socket lifecycle
+  ------------------------------------------------------------------- */
+  useEffect(() => {
+    socket = io(ENDPOINT);
+    socket.emit("setup", user);
+    socket.on("connected", () => setSocketConnected(true));
+    socket.on("typing", () => setIsTyping(true));
+    socket.on("stop typing", () => setIsTyping(false));
+  }, [user]);
+
+  useEffect(() => {
+    fetchMessages();
+    selectedChatCompare = selectedChat;
+    // eslint-disable-next-line
+  }, [selectedChat]);
+
+  /* ------------------------------------------------------------------
+     Realtime messages (USER_DELIVER frames)
+  ------------------------------------------------------------------- */
+  useEffect(() => {
+    const handler = async (frame) => {
+      console.log("[SOCP][Message received] Incoming USER_DELIVER:", frame);
+
+      const normalized = await normalizeDeliveredFrame(frame, myPrivKey);
+
+      // If you track per-chat filtering, you can check selectedChatCompare._id here.
+      setMessages((prev) => [...prev, normalized]);
     };
 
-    return (
+    socket.on("message received", handler);
+    return () => socket.off("message received", handler);
+  }, []);
+
+  /* ------------------------------------------------------------------
+     Realtime file frames (FILE_START / CHUNK / END)
+  ------------------------------------------------------------------- */
+  useEffect(() => {
+    const receiver = new FileReceiver();
+
+    const fileHandler = async (frame) => {
+      console.log("[SOCP] [File frame received] incoming file frame:", frame);
+
+      const result = await receiver.handleMessage(frame, myPrivKey);
+      if (result) {
+        const url = URL.createObjectURL(result.blob);
+        setMessages((prev) => [
+          ...prev,
+          { type: "FILE", name: result.name, url, plaintext: `[File: ${result.name}]` },
+        ]);
+        toast({
+          title: "File received!",
+          description: result.name,
+          status: "info",
+          duration: 4000,
+          isClosable: true,
+        });
+      }
+    };
+
+    socket.on("file received", fileHandler);
+    return () => socket.off("file received", fileHandler);
+  }, []);
+
+  /* ------------------------------------------------------------------
+     Typing handler
+  ------------------------------------------------------------------- */
+  const [lastTypeAt, setLastTypeAt] = useState(0);
+  const typingHandler = (e) => {
+    setNewMessage(e.target.value);
+    if (!socketConnected) return;
+    if (!typing) {
+      setTyping(true);
+      socket.emit("typing", selectedChat._id);
+    }
+    const now = Date.now();
+    setLastTypeAt(now);
+    setTimeout(() => {
+      if (Date.now() - now >= 3000 && typing) {
+        socket.emit("stop typing", selectedChat._id);
+        setTyping(false);
+      }
+    }, 3000);
+  };
+
+  /* ------------------------------------------------------------------
+     UI
+  ------------------------------------------------------------------- */
+  return (
+    <>
+      {selectedChat ? (
         <>
-            {selectedChat ? (
-                <>
-                    <Text
-                        fontSize={{ base: "20px", md: "30px" }}
-                        pb={3}
-                        px={2}
-                        w={"100%"}
-                        fontFamily={"work sans"}
-                        display={"flex"}
-                        justifyContent={{ base: "space-between" }}
-                        alignItems={"center"}
-                    >
-                        <IconButton
-                            display={{ base: "flex", md: "none" }}
-                            icon={<ArrowBackIcon />}
-                            onClick={() => setSelectedChat("")}
-                        />
-                        {!selectedChat.isGroupChat && !selectedChat.isCommunity ? (
-                            <>
-                                {getSender(user, selectedChat.users)}
-                                <ProfileModel user={getSenderFull(user, selectedChat.users)} />
-                            </>
-                        ) : (
-                            <>
-                                {selectedChat.chatName.toUpperCase()}
-                                <UpdateGroupChatModal fetchAgain={fetchAgain} setFetchAgain={setFetchAgain} fetchMessages={fetchMessages} />
-                            </>
-                        )}
-                    </Text>
-                    <Box
-                        display={"flex"}
-                        flexDir={"column"}
-                        justifyContent={"flex-end"}
-                        p={3}
-                        bg={"#E8E8E8"}
-                        w={"100%"}
-                        h={"100%"}
-                        borderRadius={"lg"}
-                        overflowY={"hidden"}
-                    >
-                        {loading ? (
-                            <Spinner
-                                size={"xl"}
-                                w={20}
-                                h={20}
-                                alignSelf={"center"}
-                                margin={"auto"}
-                            />
-                        ) : (
-                                    <ScrollableChat messages={messages} />
-                        )}
+          {/* ---------- HEADER ---------- */}
+          <Text
+            fontSize={{ base: "20px", md: "30px" }}
+            pb={3}
+            px={2}
+            w="100%"
+            fontFamily="Work Sans"
+            display="flex"
+            justifyContent={{ base: "space-between" }}
+            alignItems="center"
+          >
+            <IconButton
+              display={{ base: "flex", md: "none" }}
+              icon={<ArrowBackIcon />}
+              onClick={() => setSelectedChat("")}
+            />
 
-                        {!selectedChat.isCommunity ? 
-                        ( <FormControl
-                            onKeyDown={sendMessage}
-                            isRequired
-                            mt={3}
-                        >
-                            {istyping ? (
-                                <div className='typing' style={{ width: "5rem", borderRadius: "10px", marginBottom: "10px", backgroundColor: "#dedede", display: "flex", justifyContent: "center", alignItems: "center" }}>
-                                    Typing <div className="dot" />
-                                        <div className="dot" />
-                                        <div className="dot" />
-                                </div>
-                            ) : (
-                                <></>
-                            )}
-                            <Input variant={"filled"} bg={"#fff"} placeholder='Enter a Message' onChange={typingHandler} value={newMessage} />
-                        </FormControl> ) : ( <FormControl
-                            onKeyDown={sendMessage}
-                            isRequired
-                            mt={3}
-                        >
-                            {istyping ? (
-                                <div className='typing' style={{ width: "5rem", borderRadius: "10px", marginBottom: "10px", backgroundColor: "#dedede", display: "flex", justifyContent: "center", alignItems: "center" }}>
-                                    Typing <div className="dot" />
-                                        <div className="dot" />
-                                        <div className="dot" />
-                                </div>
-                            ) : (
-                                <></>
-                            )}
-                            <Input variant={"filled"} bg={"#fff"} disabled={selectedChat.groupAdmin._id !== user._id} placeholder='Enter a Message' onChange={typingHandler} value={newMessage} />
-                        </FormControl> )
-                        }
-                    </Box>
-                </>
-            ) : (
-                <Box
-                    display={"flex"}
-                    alignItems={"center"}
-                    justifyContent={"center"}
-                    h={"100%"}
-                >
-                    <Text
-                        fontSize={"3xl"}
-                        pb={3}
-                        fontFamily={"Work sans"}
-                    >
-                        Click on a User to start Chatting
-                    </Text>
-                </Box>
+            {isDM && (
+              <>
+                {getSender(user, selectedChat.users)}
+                <ProfileModel user={getSenderFull(user, selectedChat.users)} />
+              </>
             )}
-        </>
-    )
-}
 
-export default SingleChat
+            {isGroup && (
+              <>
+                {selectedChat.chatName.toUpperCase()}
+                <UpdateGroupChatModal
+                  fetchAgain={fetchAgain}
+                  setFetchAgain={setFetchAgain}
+                  fetchMessages={fetchMessages}
+                />
+              </>
+            )}
+          </Text>
+
+          {/* ---------- CHAT AREA ---------- */}
+          <Box
+            display="flex"
+            flexDir="column"
+            justifyContent="flex-end"
+            p={3}
+            bg="#E8E8E8"
+            w="100%"
+            h="100%"
+            borderRadius="lg"
+            overflowY="hidden"
+          >
+            {loading ? (
+              <Spinner size="xl" w={20} h={20} alignSelf="center" margin="auto" />
+            ) : (
+              <ScrollableChat messages={messages} />
+            )}
+
+            {/* ---------- INPUT ---------- */}
+            {(isDM || isGroup) && (
+              <FormControl onKeyDown={sendMessage} isRequired mt={3}>
+                {istyping && (
+                  <div className="typing" style={{ width: "5rem", marginBottom: 10 }}>
+                    Typing
+                    <div className="dot" />
+                    <div className="dot" />
+                    <div className="dot" />
+                  </div>
+                )}
+
+                {selectedFile && (
+                  <Box
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="space-between"
+                    bg="gray.100"
+                    p={2}
+                    mb={2}
+                    borderRadius="md"
+                  >
+                    <Text>{selectedFile.name}</Text>
+                    <Button size="sm" colorScheme="blue" onClick={sendFile}>
+                      Send attachment
+                    </Button>
+                  </Box>
+                )}
+
+                <InputGroup>
+                  <Input
+                    variant="filled"
+                    bg="#fff"
+                    placeholder="Enter a Message"
+                    onChange={typingHandler}
+                    value={newMessage}
+                  />
+                  <InputRightElement>
+                    <>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          if (e.target.files.length > 0) {
+                            setSelectedFile(e.target.files[0]);
+                          }
+                        }}
+                      />
+                      <span
+                        role="img"
+                        aria-label="attach file"
+                        style={{ cursor: "pointer" }}
+                        onClick={() => fileInputRef.current.click()}
+                      >
+                        📎
+                      </span>
+                    </>
+                  </InputRightElement>
+                </InputGroup>
+              </FormControl>
+            )}
+
+            {isCommunity && (
+              <Box
+                display="flex"
+                justifyContent="center"
+                alignItems="center"
+                bg="#fff0f0"
+                p={4}
+                mt={4}
+                borderRadius="lg"
+                border="1px solid #ffcccc"
+              >
+                <Text color="red.600" fontWeight="semibold">
+                  ❌ This feature is not supported in the current version. (Community chat)
+                </Text>
+              </Box>
+            )}
+          </Box>
+        </>
+      ) : (
+        <Box display="flex" alignItems="center" justifyContent="center" h="100%">
+          <Text fontSize="3xl" pb={3} fontFamily="Work Sans">
+            Click on a User to start Chatting
+          </Text>
+        </Box>
+      )}
+    </>
+  );
+};
+
+export default SingleChat;
