@@ -1,111 +1,118 @@
 const asyncHandler = require("express-async-handler");
-const Message = require('../models/messageModel');
+const Message = require("../models/messageModel");
 const User = require("../models/userModel");
-const Chat = require("../models/chatModel");
+const Group = require("../models/groupModel");
+const { v4: uuidv4 } = require("uuid");
 
+/* ------------------------------------------------------------------
+   SEND MESSAGE (SOCP v1.3 format)
+------------------------------------------------------------------- */
 const sendMessage = asyncHandler(async (req, res) => {
-  // NEW: accept both plaintext and encrypted bodies
   const {
-    chatId,
-    toUserId,              // required for DM delivery
-    content,               // plaintext
-    ciphertext,            // encrypted payload
-    content_sig,           // signature name used by FE
-    sig,                   // alt signature name
+    toUserId, // recipient UUID (for DM)
+    group_id, // optional (for group/public)
+    ciphertext, // encrypted body
+    sender_pub, // sender's RSA public key
+    content_sig, // signature
+    ts, // SOCP timestamp (ms)
+    message_type, // 'direct' or 'public'
   } = req.body;
 
-  if (!chatId) {
-    console.log("Invalid request: missing chatId");
-    return res.status(400).json({ ok: false, error: "chatId required" });
-  }
-  if (!toUserId) {
-    // SOCP DM requires an explicit destination
-    return res.status(400).json({ ok: false, error: "missing_toUserId" });
-  }
-
-  // Decide mode + payload we’ll forward over the network
-  let mode, payloadForNetwork;
-
-  if (ciphertext) {
-    const signature = content_sig || sig;
-    if (!signature) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "missing_signature_for_ciphertext" });
-    }
-    mode = "encrypted";
-    payloadForNetwork = { ciphertext, signature };
-  } else if (typeof content === "string" && content.length > 0) {
-    mode = "plaintext";
-    payloadForNetwork = { content };
-  } else {
+  // Validation
+  if (!ciphertext || !content_sig || !sender_pub) {
     return res
       .status(400)
-      .json({ ok: false, error: "missing_message_body" });
+      .json({ ok: false, error: "Missing ciphertext or signature or pubkey" });
   }
 
-  // Persist like before so latestMessage works.
-  // For encrypted, store a placeholder text to avoid schema changes.
-  let savedMessage = null;
-  try {
-    const toSaveContent =
-      mode === "plaintext" ? content : " Encrypted message";
+  const sender_id = req.user.user_id;
+  const timestamp = ts || Date.now();
 
-    let newMessage = {
-      sender: req.user._id,
-      content: toSaveContent,
-      chat: chatId,
-    };
-
-    savedMessage = await Message.create(newMessage);
-
-    savedMessage = await savedMessage.populate("sender", "name pic");
-    savedMessage = await savedMessage.populate("chat");
-    savedMessage = await User.populate(savedMessage, {
-      path: "chat.users",
-      select: "name pic email",
-    });
-
-    await Chat.findByIdAndUpdate(chatId, { latestMessage: savedMessage });
-  } catch (error) {
-    console.error("[sendMessage] DB error:", error);
-    return res.status(400).json({ ok: false, error: error.message });
+  // For DMs, ensure toUserId is defined
+  if (message_type === "direct" && !toUserId) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "Missing recipient ID for DM" });
   }
 
-  // Hand off to Finlay’s network layer
+  // Generate message UUID
+  const message_id = uuidv4();
+
+  // Construct database record
+  const messageDoc = {
+    message_id,
+    group_id: group_id || "direct",
+    sender_id,
+    ciphertext,
+    sender_pub,
+    content_sig,
+    timestamp,
+    message_type: message_type || "direct",
+    recipient_id: toUserId || null,
+    version: 1,
+  };
+
   try {
-    if (!req.app.locals?.network?.sendServerDeliver) {
-      return res
-        .status(500)
-        .json({ ok: false, error: "network_api_missing" });
+    const savedMessage = await Message.create(messageDoc);
+
+    // Update "latestMessage" equivalent if group exists
+    if (group_id) {
+      await Group.updateOne(
+        { group_id },
+        { $set: { "meta.latest_message": message_id } }
+      );
     }
 
-    await req.app.locals.network.sendServerDeliver(
-      toUserId,
-      payloadForNetwork,
-      { chatId, mode }
-    );
-  } catch (e) {
-    console.error("[sendMessage] network deliver failed:", e);
-    return res.status(202).json({ ok: false, deliver: "failed", error: e.message });
-  }
+    // Deliver to SOCP network
+    if (!req.app.locals?.network?.sendServerDeliver) {
+      console.warn("[SOCP][sendMessage] ⚠️ No network layer available");
+    } else {
+      const payload = {
+        ciphertext,
+        sender_pub,
+        content_sig,
+      };
+      const mode = message_type === "public" ? "public" : "direct";
+      await req.app.locals.network.sendServerDeliver(
+        toUserId || group_id,
+        payload,
+        { fromUser: sender_id, mode }
+      );
+    }
 
-  // Response stays compatible with your frontend (plaintext path),
-  // plus we include mode so FE can distinguish encrypted.
-  return res.json({ ok: true, mode, message: savedMessage });
+    return res.status(200).json({ ok: true, message: savedMessage });
+  } catch (err) {
+    console.error("[SOCP][sendMessage] DB error:", err);
+    return res.status(400).json({ ok: false, error: err.message });
+  }
 });
 
-
+/* ------------------------------------------------------------------
+   GET ALL MESSAGES IN CHAT OR GROUP
+------------------------------------------------------------------- */
 const allMessage = asyncHandler(async (req, res) => {
-    try {
-        const messages = await Message.find({ chat: req.params.chatId }).populate("sender", "name pic email")
-            .populate("chat");
+  const { chatId } = req.params; // can be group_id or 'direct'
 
-        res.json(messages)
-    } catch (error) {
-        res.status(400);
-        throw new Error(error.message);
-    }
-})
+  try {
+    const messages = await Message.find({ group_id: chatId })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    // Optional: attach display sender info
+    const enriched = await Promise.all(
+      messages.map(async (m) => {
+        const sender = await User.findOne({ user_id: m.sender_id }).select(
+          "user_id login_email meta.display_name meta.avatar_url"
+        );
+        return { ...m, sender };
+      })
+    );
+
+    res.status(200).json(enriched);
+  } catch (err) {
+    console.error("[SOCP][allMessage] DB error:", err);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
 
 module.exports = { sendMessage, allMessage };

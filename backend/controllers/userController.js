@@ -74,13 +74,14 @@ const getUserPublicKey = async (req, res) => {
 const loginUser = async (req, res) => {
   try {
     const { login_email, password } = req.body;
+    console.log("Login attempt with data:", req.body);
     const user = await User.findOne({ login_email });
     if (!user) {
-      console.log("User not found:", user_id);
+      console.log("User not found!");
       return res.status(404).json({ error: "USER_NOT_FOUND" });
     }
 
-    console.log("User found:", user_id);
+    console.log("User found:", user.user_id);
     console.log("User data:", {
       hasPubkey: !!user.pubkey,
       hasPrivkeyStore: !!user.privkey_store,

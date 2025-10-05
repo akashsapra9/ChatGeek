@@ -209,8 +209,8 @@ const io = require("socket.io")(server, {
   pingTimeout: 60000,
   cors: {
     origin: [
-      "htp://localhttp://localhost:3000",
-      "htp://localhttp://localhost:3001",
+      "http://localhost:3000",
+      "http://localhost:3001",
       "http://localhost:3002",
     ],
   },
@@ -219,14 +219,15 @@ const io = require("socket.io")(server, {
 io.on("connection", (socket) => {
   console.log("Connected to Socket.io");
 
+  // When client emits "setup" with its user data
   socket.on("setup", (userData) => {
-    socket.join(userData._id);
+    socket.join(userData.user_id); // ✅ use user_id now
     socket.emit("connected");
   });
 
   socket.on("join chat", (room) => {
     socket.join(room);
-    console.log("User Joined Room: " + room);
+    console.log("User joined room:", room);
   });
 
   socket.on("typing", (room) => socket.in(room).emit("typing"));
@@ -235,15 +236,18 @@ io.on("connection", (socket) => {
   socket.on("new message", (newMessageRecieved) => {
     const chat = newMessageRecieved.chat;
     if (!chat?.users) return console.log("chat.users not defined");
+
     chat.users.forEach((user) => {
-      if (user._id == newMessageRecieved.sender._id) return;
-      socket.in(user._id).emit("message recieved", newMessageRecieved);
+      // ✅ skip sender
+      if (user.user_id === newMessageRecieved.sender.user_id) return;
+
+      // ✅ emit to each recipient’s user_id room
+      socket.in(user.user_id).emit("message recieved", newMessageRecieved);
     });
   });
 
   socket.off("setup", () => {
     console.log("USER DISCONNECTED");
-    // userData is not defined here; leaving as-is from original code
   });
 });
 
