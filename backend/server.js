@@ -13,8 +13,6 @@ const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const bus = require("./network/events");
 const fileRoutes = require("./routes/fileRoutes");
 
-
-
 // Import models for public channel initialization
 const Group = require("./models/groupModel");
 const GroupMember = require("./models/groupMemberModel");
@@ -43,39 +41,42 @@ const app = express();
 const initializePublicChannel = async () => {
   try {
     const publicChannelExists = await Group.findOne({ group_id: "public" });
-    
+
     if (!publicChannelExists) {
       await Group.create({
         group_id: "public",
-        creator_id: "system", 
+        creator_id: "system",
         name: "Public Channel",
         meta: {
-          description: "Network-wide public channel"
+          description: "Network-wide public channel",
         },
-        version: 1
+        version: 1,
       });
       console.log("[SOCP] Public channel initialized in database");
     } else {
       console.log("[SOCP] Public channel already exists in database");
     }
-    
+
     // Optional: Log public channel members count
-    const memberCount = await GroupMember.countDocuments({ group_id: "public" });
+    const memberCount = await GroupMember.countDocuments({
+      group_id: "public",
+    });
     console.log(`[SOCP] Public channel has ${memberCount} members`);
-    
   } catch (error) {
     console.error("[SOCP] Failed to initialize public channel:", error);
   }
 };
 
 // ===== Database Connection with Public Channel Init =====
-connectDB().then(() => {
-  // Initialize public channel after successful DB connection
-  initializePublicChannel();
-}).catch((error) => {
-  console.error("Database connection failed:", error);
-  process.exit(1);
-});
+connectDB()
+  .then(() => {
+    // Initialize public channel after successful DB connection
+    initializePublicChannel();
+  })
+  .catch((error) => {
+    console.error("Database connection failed:", error);
+    process.exit(1);
+  });
 
 app.use(express.json());
 
@@ -92,7 +93,9 @@ app.use("/api/file", fileRoutes);
 try {
   console.log("[HTTP] /api/file mounted");
 } catch (e) {
-  console.log("[HTTP] /api/file not mounted (routes/fileRoutes.js not found yet)");
+  console.log(
+    "[HTTP] /api/file not mounted (routes/fileRoutes.js not found yet)"
+  );
 }
 
 // Error middleware
@@ -100,22 +103,37 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Debug event taps (safe to keep)
-bus.on("network:presenceUpdate", (evt) => console.log("[DBG] presenceUpdate ->", evt));
-bus.on("network:userDeliver",   (p) => console.log("[DBG] network:userDeliver ->", p));
-bus.on("network:publicMessage", (p) => console.log("[DBG] publicMessage ->", p));
-bus.on("network:publicKeyShare",(p) => console.log("[DBG] publicKeyShare ->", p));
-bus.on("network:fileStart",     (p) => console.log("[DBG] fileStart", p));
-bus.on("network:fileChunk",     (p) => console.log("[DBG] fileChunk", p));
-bus.on("network:fileEnd",       (p) => console.log("[DBG] fileEnd", p));
-bus.on("network:ack",           (p) => console.log("[DBG] ACK   <-", p));
-bus.on("network:error",         (p) => console.log("[DBG] ERROR <-", p));
-bus.on("network:tx:error",      (p) => console.log("[DBG] TX ERROR ->", p));
-bus.on("network:tx:ack",        (p) => console.log("[DBG] TX ACK   ->", p));
+bus.on("network:presenceUpdate", (evt) =>
+  console.log("[DBG] presenceUpdate ->", evt)
+);
+bus.on("network:userDeliver", (p) =>
+  console.log("[DBG] network:userDeliver ->", p)
+);
+bus.on("network:publicMessage", (p) =>
+  console.log("[DBG] publicMessage ->", p)
+);
+bus.on("network:publicKeyShare", (p) =>
+  console.log("[DBG] publicKeyShare ->", p)
+);
+bus.on("network:fileStart", (p) => console.log("[DBG] fileStart", p));
+bus.on("network:fileChunk", (p) => console.log("[DBG] fileChunk", p));
+bus.on("network:fileEnd", (p) => console.log("[DBG] fileEnd", p));
+bus.on("network:ack", (p) => console.log("[DBG] ACK   <-", p));
+bus.on("network:error", (p) => console.log("[DBG] ERROR <-", p));
+bus.on("network:tx:error", (p) => console.log("[DBG] TX ERROR ->", p));
+bus.on("network:tx:ack", (p) => console.log("[DBG] TX ACK   ->", p));
 
 // SLC facades: app.locals.network & app.locals.fileService
 const { advertiseUser, removeUser } = require("./network/presence");
-const { sendServerDeliver, broadcastPublicMessage } = require("./network/delivery");
-const { sendFileStart, sendFileChunk, sendFileEnd } = require("./network/files");
+const {
+  sendServerDeliver,
+  broadcastPublicMessage,
+} = require("./network/delivery");
+const {
+  sendFileStart,
+  sendFileChunk,
+  sendFileEnd,
+} = require("./network/files");
 
 // helper: bridge selected events from our internal bus to a public EventEmitter
 function makeBridge(emitter, mappings) {
@@ -132,18 +150,20 @@ function makeBridge(emitter, mappings) {
 // app.locals.network
 const networkEmitter = new EventEmitter();
 networkEmitter.sendServerDeliver = sendServerDeliver;
-networkEmitter.broadcastPublicMessage = broadcastPublicMessage || (async (opaque) => bus.emit("network:publicMessage", opaque));
+networkEmitter.broadcastPublicMessage =
+  broadcastPublicMessage ||
+  (async (opaque) => bus.emit("network:publicMessage", opaque));
 networkEmitter.advertiseUser = advertiseUser;
 networkEmitter.removeUser = removeUser;
 
 makeBridge(networkEmitter, [
-  ["network:userDeliver",    "userDeliver"],
+  ["network:userDeliver", "userDeliver"],
   ["network:presenceUpdate", "presenceUpdate"],
-  ["network:publicMessage",  "publicMessage"],
+  ["network:publicMessage", "publicMessage"],
   ["network:publicKeyShare", "publicKeyShare"],
-  ["network:publicUpdate",   "publicUpdate"],
-  ["network:ack",            "ack"],
-  ["network:error",          "error"],
+  ["network:publicUpdate", "publicUpdate"],
+  ["network:ack", "ack"],
+  ["network:error", "error"],
 ]);
 
 app.locals.network = networkEmitter;
@@ -152,17 +172,19 @@ app.locals.network = networkEmitter;
 const fileEmitter = new EventEmitter();
 fileEmitter.sendFileStart = sendFileStart;
 fileEmitter.sendFileChunk = sendFileChunk;
-fileEmitter.sendFileEnd   = sendFileEnd;
+fileEmitter.sendFileEnd = sendFileEnd;
 
 makeBridge(fileEmitter, [
   ["network:fileStart", "fileStart"],
   ["network:fileChunk", "fileChunk"],
-  ["network:fileEnd",   "fileEnd"],
+  ["network:fileEnd", "fileEnd"],
 ]);
 
 app.locals.fileService = fileEmitter;
 
-console.log("[SOCP] SLC facades ready: app.locals.network & app.locals.fileService");
+console.log(
+  "[SOCP] SLC facades ready: app.locals.network & app.locals.fileService"
+);
 
 // Start SLC (after app.locals are ready)
 try {
@@ -177,15 +199,21 @@ try {
   console.warn("[SLC] not started:", e?.message);
 }
 
-// Start HTTP server + Socket.IO 
-const PORT = process.env.PORT || 5000;
+// Start HTTP server + Socket.IO
+const PORT = process.env.PORT || 5001;
 const server = app.listen(PORT, () => {
   console.log(`Server started on PORT: ${PORT}`);
 });
 
 const io = require("socket.io")(server, {
   pingTimeout: 60000,
-  cors: { origin: "http://localhost:3000" },
+  cors: {
+    origin: [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://localhost:3002",
+    ],
+  },
 });
 
 io.on("connection", (socket) => {

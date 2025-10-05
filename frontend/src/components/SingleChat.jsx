@@ -11,7 +11,7 @@ import io from 'socket.io-client'
 import './styles.css'
 import { encryptMessage, decryptMessage, signMessage, verifyMessage } from "../utils/crypto";
 
-const ENDPOINT = "http://localhost:5000";
+const ENDPOINT = "http://localhost:5001";
 // eslint-disable-next-line
 var socket, selectedChatCompare;
 
@@ -26,7 +26,11 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     const toast = useToast();
 
     const { selectedChat, setSelectedChat, user, notification, setNotification } = ChatState();
-
+    // Debug: print the attributes of user object
+    console.log("[DBG] User object:", user);
+    // Debug: print the attributes of selectedChat object
+    console.log("[DBG] SelectedChat object:", selectedChat);
+    
     const fetchMessages = async () => {
         if (!selectedChat) return;
 

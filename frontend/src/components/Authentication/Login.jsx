@@ -4,6 +4,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import { useHistory } from 'react-router-dom/cjs/react-router-dom.min';
 import { CryptoUtils } from '../../utils/cryptoUtils';
+import { ChatState } from "../../Context/chatProvider";
 
 const Login = () => {
     
@@ -13,24 +14,26 @@ const Login = () => {
     const [loading, setLoading] = useState(false)
     const toast = useToast();
     const history = useHistory();
+
+    const { setUser, setPrivateKey } = ChatState(); // ✅ access context
     
     const handleClick = () => setShow(!show);
     
     const submitHandler = async() => { 
         setLoading(true);
-        console.log("🚀 Login started for user:", userId);
+        console.log("[DEBUG][chatProvider.jsx] Login started for user id:", userId);
         
-        if(!userId || !password) {
+        if (!userId || !password) {
             toast({
-                title: "Please fill all the fields!",
-                status: "warning",
-                duration: 5000,
-                isClosable: true,
-                position: "bottom",
+              title: "Please fill all the fields!",
+              status: "warning",
+              duration: 5000,
+              isClosable: true,
+              position: "bottom",
             });
             setLoading(false);
             return;
-        }
+          }
         
         try {
             const config = {
@@ -41,6 +44,7 @@ const Login = () => {
             
             console.log("1. Sending login request to backend...");
             
+            //STEP 1. Login request to backend. Backend will Backend verifies credentials matches PAKE verifier or password
             // First, get user data including encrypted private key
             const { data } = await axios.post("/api/user/login",
             { user_id: userId, password },
@@ -56,6 +60,7 @@ const Login = () => {
             console.log("3. User data received, encrypted private key length:", data.user.privkey_store?.length);
             console.log("4. Attempting to decrypt private key...");
 
+            // STEP 2. Decrypt private key with password locally
             // Decrypt the private key with the password
             const decryptedPrivateKey = CryptoUtils.decryptPrivateKey(
                 data.user.privkey_store, 
@@ -63,23 +68,20 @@ const Login = () => {
             );
 
             console.log("5. Private key decrypted successfully");
-            console.log("6. Decrypted key starts with:", decryptedPrivateKey.substring(0, 50));
 
-            // Verify this looks like a valid private key
+            // TODO: is there a better way to validate?
             if (!decryptedPrivateKey.includes('BEGIN RSA PRIVATE KEY')) {
                 console.warn("⚠️ Decrypted key doesn't look like a valid RSA private key");
             }
 
-            // Store user info with decrypted private key
-            const userInfo = {
-                ...data.user,
-                privateKey: decryptedPrivateKey
-            };
+            // ✅ store decrypted key only in memory
+            setPrivateKey(decryptedPrivateKey);
 
-            console.log("7. Storing user info in localStorage...");
-            
-            localStorage.setItem('userInfo', JSON.stringify(userInfo));
-            
+
+            // ✅ store non-sensitive info only in localStorage
+            localStorage.setItem("userInfo", JSON.stringify(data.user));
+            setUser(data.user);
+
             toast({
                 title: "Login Successful!",
                 status: "success",

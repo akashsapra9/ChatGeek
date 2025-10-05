@@ -4,6 +4,7 @@ import React from 'react'
 import axios from 'axios';
 import { useHistory } from 'react-router-dom/cjs/react-router-dom.min';
 import { CryptoUtils } from '../../utils/cryptoUtils';
+import { ChatState } from "../../Context/chatProvider";
 
 const Signup = () => {
 
@@ -16,6 +17,7 @@ const Signup = () => {
     const [loading, setLoading] = useState(false);
     const toast = useToast();
     const history = useHistory();
+    const { setUser, setPrivateKey } = ChatState();
 
     const submitHandler = async () => {
         setLoading(true);
@@ -64,6 +66,7 @@ const Signup = () => {
             const encryptedPrivateKey = CryptoUtils.encryptPrivateKey(keyPair.privateKey, password);
             console.log("✅ Private key encrypted");
 
+            // 🧱 (A) The backend user object stored in MongoDB
             const { data } = await axios.post("/api/user/register",
                 {
                     user_id: userId,
@@ -77,12 +80,10 @@ const Signup = () => {
                 config
             );
             
-            // Store the decrypted private key temporarily in localStorage for immediate use
-            // In production, you'd decrypt it only when needed and store in memory
-            const userInfo = {
-                ...data.user,
-                privateKey: keyPair.privateKey  // Store decrypted private key temporarily
-            };
+            // ✅ Store user info (only encrypted key)
+            localStorage.setItem("userInfo", JSON.stringify(data.user));
+            setUser(data.user);              // setUser from ChatState
+            setPrivateKey(keyPair.privateKey); // keep plaintext key only in memory
             
             toast({
                 title: "Registration Successful!",
@@ -92,7 +93,6 @@ const Signup = () => {
                 position: "bottom",
             });
 
-            localStorage.setItem('userInfo', JSON.stringify(userInfo));
             setLoading(false);
             history.push("/chats")
         }
