@@ -8,15 +8,23 @@ const { sendError } = require("./ack");
 const { ERR } = require("./codes");
 const { meshState } = require("./state/meshState");
 const { validateEnvelope, validateByType } = require("./validators");
+const bus = require("./events");
+
+// import inbound handler
+const { handleInboundEnvelope } = require("./inbound");
 
 const FIRST_FRAME_TYPES = new Set(["SERVER_HELLO_JOIN", "SERVER_HELLO_LINK"]);
 const ALLOWED_TYPES = new Set(Object.keys(handlers));
 
 function looksLikeEnvelope(x) {
-  return x && typeof x === "object"
-    && typeof x.type === "string"
-    && x.payload && typeof x.payload === "object"
-    && typeof x.ts === "number";
+  return (
+    x &&
+    typeof x === "object" &&
+    typeof x.type === "string" &&
+    x.payload &&
+    typeof x.payload === "object" &&
+    typeof x.ts === "number"
+  );
 }
 
 function attach(wss) {
@@ -44,11 +52,11 @@ function attach(wss) {
     }
 
     ws.on("close", () => {
-      for (const [sid, l] of meshState.servers) if (l === link) meshState.servers.delete(sid);
+      for (const [sid, l] of meshState.servers)
+        if (l === link) meshState.servers.delete(sid);
     });
 
     ws.on("message", async (buf) => {
-      // Raw frame size guard (also enforced by ws server option)
       if (buf.length > meshCfg.MAX_WS_PAYLOAD_BYTES) {
         try { ws.close(1009, "payload too large"); } catch {}
         return;
@@ -58,22 +66,18 @@ function attach(wss) {
       try { env = JSON.parse(buf.toString("utf8")); } catch { return; }
       if (!looksLikeEnvelope(env)) return;
 
-      // Build ctx early so we can reply
       const ctx = { link, req };
 
-      // Rate limit
       if (!takeToken()) {
         sendError(ctx, env, ERR.RATE_LIMIT, "too many frames");
         return;
       }
 
-      // Only allow server message types
       if (!ALLOWED_TYPES.has(env.type)) {
         sendError(ctx, env, ERR.UNKNOWN_TYPE, "Not a server message type");
         return;
       }
 
-      // Enforce first-frame server hello
       if (!handshakeDone) {
         if (!FIRST_FRAME_TYPES.has(env.type)) {
           try { ws.close(1008, "Expected server hello"); } catch {}
@@ -82,28 +86,45 @@ function attach(wss) {
         handshakeDone = true;
       }
 
-      // Liveness
       if (env.from) meshState.lastSeen.set(env.from, Date.now());
 
-      // Transport verification
       const v = verifyIncoming(env);
       if (!v.ok) {
         sendError(ctx, env, v.reason, "Verification failed");
         return;
       }
 
-      // Envelope & payload validation
       const ve = validateEnvelope(env);
       if (!ve.ok) {
-        sendError(ctx, env, ve.reason === "BAD_TIMESTAMP" ? ERR.BAD_TIMESTAMP : ERR.BAD_PAYLOAD, "Envelope invalid");
+        sendError(
+          ctx,
+          env,
+          ve.reason === "BAD_TIMESTAMP" ? ERR.BAD_TIMESTAMP : ERR.BAD_PAYLOAD,
+          "Envelope invalid"
+        );
         return;
       }
+
       const vp = validateByType(env.type, env.payload);
       if (!vp.ok) {
         sendError(ctx, env, ERR.BAD_PAYLOAD, vp.reason || "Payload invalid");
         return;
       }
 
+      // NEW: Try to handle inbound messages first
+      const inboundResult = handleInboundEnvelope(bus, {
+        op: env.type,
+        from: env.from,
+        to: env.to,
+        ts: env.ts,
+        body: env.payload,
+      });
+
+      if (!inboundResult.ok && inboundResult.error !== "unknown_op") {
+        console.warn("[SOCP][Inbound] Drop:", inboundResult.error);
+      }
+
+      // Keep legacy handler if still needed (Finlay’s)
       const fn = handlers[env.type];
       if (typeof fn === "function") {
         try { await fn(env, ctx); }
@@ -117,7 +138,6 @@ function startMeshWebSocket() {
   const server = http.createServer();
   const wss = new WebSocket.Server({
     server,
-    // Enforce a max frame size at WS level too
     maxPayload: meshCfg.MAX_WS_PAYLOAD_BYTES,
   });
   attach(wss);
