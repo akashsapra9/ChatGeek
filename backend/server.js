@@ -12,7 +12,8 @@ const messageRoutes = require("./routes/messageRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const bus = require("./network/events");
 const fileRoutes = require("./routes/fileRoutes");
-
+const authSrpRoutes = require('./routes/authSrpRoutes');
+const requireSession = require('./middleware/requireSession');
 
 
 // Import models for public channel initialization
@@ -83,7 +84,11 @@ app.use(express.json());
 app.get("/", (_req, res) => res.send("API is Running"));
 
 // ===== Routes =====
+app.use('/api/auth/srp', authSrpRoutes);
 app.use("/api/user", userRoutes);
+
+app.use(requireSession);
+
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/file", fileRoutes);

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import { useHistory } from 'react-router-dom/cjs/react-router-dom.min';
 import { CryptoUtils } from '../../utils/cryptoUtils';
+import { srpLogin } from '../../utils/srp_login';
 
 const Login = () => {
     
@@ -33,51 +34,63 @@ const Login = () => {
         }
         
         try {
+            // --- SRP 6a Handshake ---
+            console.log("1. Starting SRP-6a handshake…");
+            const { session_id, expires, K } = await srpLogin({
+                baseUrl: process.env.REACT_APP_API_BASE_URL || '',
+                user_id: userId,
+                password,
+            });
+            console.log("2. SRP OK. session_id:", session_id, "expires:", expires);
+
+            sessionStorage.setItem('session_id', session_id);
+            sessionStorage.setItem('session_expires', String(expires));
+            
+            // Send the session with every axios request from now on
+            axios.defaults.headers.common['x-session-id'] = session_id;
+
+            // Keep the link key in memory only
+            window.__LINK_KEY__ = K;
+
+            // --- Fetch user record using the session ---
             const config = {
                 headers: {
-                    "Content-type": "application/json"
+                    "Content-type": "application/json",
+                    "x-session-id": session_id,
                 },
             };
-            
-            console.log("1. Sending login request to backend...");
-            
-            // First, get user data including encrypted private key
-            const { data } = await axios.post("/api/user/login",
-            { user_id: userId, password },
-            config
-            );
+            console.log("3. Fetching user profile via session…");
+            const { data } = await axios.get("/api/user/me", config);
 
-            console.log("2. Backend response:", data);
-
-            if (!data.success) {
-                throw new Error(data.error || "Login failed");
+            if (!data?.user) {
+                throw new Error("User profile not found");
             }
 
-            console.log("3. User data received, encrypted private key length:", data.user.privkey_store?.length);
-            console.log("4. Attempting to decrypt private key...");
+            console.log("4. User profile received, encrypted private key length:", data.user.privkey_store?.length);
+            console.log("5. Attempting to decrypt private key...");
 
-            // Decrypt the private key with the password
             const decryptedPrivateKey = CryptoUtils.decryptPrivateKey(
                 data.user.privkey_store, 
                 password
             );
 
-            console.log("5. Private key decrypted successfully");
-            console.log("6. Decrypted key starts with:", decryptedPrivateKey.substring(0, 50));
+            console.log("6. Private key decrypted successfully");
+            console.log("7. Decrypted key starts with:", decryptedPrivateKey.substring(0, 50));
 
-            // Verify this looks like a valid private key
             if (!decryptedPrivateKey.includes('BEGIN RSA PRIVATE KEY')) {
                 console.warn("⚠️ Decrypted key doesn't look like a valid RSA private key");
             }
 
-            // Store user info with decrypted private key
+            // Safer: keep the decrypted key only in memory
+            window.__PRIVATE_KEY__ = decryptedPrivateKey;
+
             const userInfo = {
                 ...data.user,
-                privateKey: decryptedPrivateKey
+                // If you absolutely must persist the key, uncomment next line (discouraged):
+                // privateKey: decryptedPrivateKey,
             };
 
-            console.log("7. Storing user info in localStorage...");
-            
+            console.log("8. Storing user info (without private key) in localStorage...");
             localStorage.setItem('userInfo', JSON.stringify(userInfo));
             
             toast({

@@ -81,14 +81,14 @@ export class CryptoUtils {
     }
   }
 
-  // Generate PAKE verifier (simplified - in real implementation use proper PAKE)
-  static generatePakeVerifier(password) {
-    // For now, we'll use a simple hash-based approach
-    // In production, implement proper PAKE like SRP or OPAQUE
-    const md = forge.md.sha256.create();
-    md.update(password + 'socp_salt_' + Date.now());
-    return forge.util.encode64(md.digest().getBytes());
-  }
+  // // Generate PAKE verifier (simplified - in real implementation use proper PAKE)
+  // static generatePakeVerifier(password) {
+  //   // For now, we'll use a simple hash-based approach
+  //   // In production, implement proper PAKE like SRP or OPAQUE
+  //   const md = forge.md.sha256.create();
+  //   md.update(password + 'socp_salt_' + Date.now());
+  //   return forge.util.encode64(md.digest().getBytes());
+  // }
 
   // Encrypt message with recipient's public key (RSA-OAEP)
   static encryptMessage(message, publicKeyPem) {

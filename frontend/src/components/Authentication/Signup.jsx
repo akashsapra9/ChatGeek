@@ -4,6 +4,7 @@ import React from 'react'
 import axios from 'axios';
 import { useHistory } from 'react-router-dom/cjs/react-router-dom.min';
 import { CryptoUtils } from '../../utils/cryptoUtils';
+import { fetchSrpParams, computeSaltAndVerifier } from '../../utils/srp';
 
 const Signup = () => {
 
@@ -56,26 +57,41 @@ const Signup = () => {
             const keyPair = await CryptoUtils.generateKeyPair();
             console.log("✅ Key pair generated");
 
-            // Generate PAKE verifier
-            const pakeVerifier = CryptoUtils.generatePakeVerifier(password);
-            console.log("✅ PAKE verifier generated");
+            // // Generate PAKE verifier
+            // const pakeVerifier = CryptoUtils.generatePakeVerifier(password);
+            // console.log("✅ PAKE verifier generated");
+
+            // SRP-6a: fetch params and compute salt+verifier
+            const params = await fetchSrpParams(process.env.REACT_APP_API_BASE_URL || '');
+            const { pake_password } = await computeSaltAndVerifier(params, userId, password);
+            console.log("✅ SRP-6a salt+verifier generated");
+
 
             // Encrypt private key with user's password
             const encryptedPrivateKey = CryptoUtils.encryptPrivateKey(keyPair.privateKey, password);
             console.log("✅ Private key encrypted");
 
-            const { data } = await axios.post("/api/user/register",
+            const prev = axios.defaults.headers.common['x-session-id'];
+            delete axios.defaults.headers.common['x-session-id'];
+
+            let data;
+            try {
+              ({ data } = await axios.post("/api/user/register",
                 {
                     user_id: userId,
                     pubkey: keyPair.publicKey,  // Actual RSA-4096 public key
                     privkey_store: encryptedPrivateKey,  // Encrypted private key
-                    pake_password: pakeVerifier,  // PAKE verifier
+                    // pake_password: pakeVerifier,  // PAKE verifier
+                    pake_password, // <-- structured JSON blob
                     meta: {
                         display_name: displayName
                     }
-                },
-                config
-            );
+                }, {headers: { "Content-Type": "application/json" }, }));
+            } finally {
+              if (prev) axios.defaults.headers.common['x-session-id'] = prev;
+            }
+
+            
             
             // Store the decrypted private key temporarily in localStorage for immediate use
             // In production, you'd decrypt it only when needed and store in memory
