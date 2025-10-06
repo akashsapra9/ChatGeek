@@ -43,26 +43,19 @@ const app = express();
 const initializePublicChannel = async () => {
   try {
     const publicChannelExists = await Group.findOne({ group_id: "public" });
-
     if (!publicChannelExists) {
       await Group.create({
         group_id: "public",
         creator_id: "system",
         name: "Public Channel",
-        meta: {
-          description: "Network-wide public channel",
-        },
+        meta: { description: "Network-wide public channel" },
         version: 1,
       });
       console.log("[SOCP] Public channel initialized in database");
     } else {
       console.log("[SOCP] Public channel already exists in database");
     }
-
-    // Optional: Log public channel members count
-    const memberCount = await GroupMember.countDocuments({
-      group_id: "public",
-    });
+    const memberCount = await GroupMember.countDocuments({ group_id: "public" });
     console.log(`[SOCP] Public channel has ${memberCount} members`);
   } catch (error) {
     console.error("[SOCP] Failed to initialize public channel:", error);
@@ -72,7 +65,6 @@ const initializePublicChannel = async () => {
 // ===== Database Connection with Public Channel Init =====
 connectDB()
   .then(() => {
-    // Initialize public channel after successful DB connection
     initializePublicChannel();
   })
   .catch((error) => {
@@ -88,9 +80,6 @@ app.get("/", (_req, res) => res.send("API is Running"));
 // ===== Routes =====
 app.use("/api/auth/srp", authSrpRoutes);
 app.use("/api/user", userRoutes);
-
-app.use(requireSession);
-
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/file", fileRoutes);
@@ -99,9 +88,7 @@ app.use("/api/file", fileRoutes);
 try {
   console.log("[HTTP] /api/file mounted");
 } catch (e) {
-  console.log(
-    "[HTTP] /api/file not mounted (routes/fileRoutes.js not found yet)"
-  );
+  console.log("[HTTP] /api/file not mounted (routes/fileRoutes.js not found yet)");
 }
 
 // Error middleware
@@ -109,37 +96,22 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Debug event taps (safe to keep)
-bus.on("network:presenceUpdate", (evt) =>
-  console.log("[DBG] presenceUpdate ->", evt)
-);
-bus.on("network:userDeliver", (p) =>
-  console.log("[DBG] network:userDeliver ->", p)
-);
-bus.on("network:publicMessage", (p) =>
-  console.log("[DBG] publicMessage ->", p)
-);
-bus.on("network:publicKeyShare", (p) =>
-  console.log("[DBG] publicKeyShare ->", p)
-);
-bus.on("network:fileStart", (p) => console.log("[DBG] fileStart", p));
-bus.on("network:fileChunk", (p) => console.log("[DBG] fileChunk", p));
-bus.on("network:fileEnd", (p) => console.log("[DBG] fileEnd", p));
-bus.on("network:ack", (p) => console.log("[DBG] ACK   <-", p));
-bus.on("network:error", (p) => console.log("[DBG] ERROR <-", p));
-bus.on("network:tx:error", (p) => console.log("[DBG] TX ERROR ->", p));
-bus.on("network:tx:ack", (p) => console.log("[DBG] TX ACK   ->", p));
+bus.on("network:presenceUpdate", (evt) => console.log("[DBG] presenceUpdate ->", evt));
+bus.on("network:userDeliver",   (p) => console.log("[DBG] network:userDeliver ->", p));
+bus.on("network:publicMessage", (p) => console.log("[DBG] publicMessage ->", p));
+bus.on("network:publicKeyShare",(p) => console.log("[DBG] publicKeyShare ->", p));
+bus.on("network:fileStart",     (p) => console.log("[DBG] fileStart", p));
+bus.on("network:fileChunk",     (p) => console.log("[DBG] fileChunk", p));
+bus.on("network:fileEnd",       (p) => console.log("[DBG] fileEnd", p));
+bus.on("network:ack",           (p) => console.log("[DBG] ACK   <-", p));
+bus.on("network:error",         (p) => console.log("[DBG] ERROR <-", p));
+bus.on("network:tx:error",      (p) => console.log("[DBG] TX ERROR ->", p));
+bus.on("network:tx:ack",        (p) => console.log("[DBG] TX ACK   ->", p));
 
 // SLC facades: app.locals.network & app.locals.fileService
 const { advertiseUser, removeUser } = require("./network/presence");
-const {
-  sendServerDeliver,
-  broadcastPublicMessage,
-} = require("./network/delivery");
-const {
-  sendFileStart,
-  sendFileChunk,
-  sendFileEnd,
-} = require("./network/files");
+const { sendServerDeliver, broadcastPublicMessage } = require("./network/delivery");
+const { sendFileStart, sendFileChunk, sendFileEnd } = require("./network/files");
 
 // helper: bridge selected events from our internal bus to a public EventEmitter
 function makeBridge(emitter, mappings) {
@@ -157,19 +129,18 @@ function makeBridge(emitter, mappings) {
 const networkEmitter = new EventEmitter();
 networkEmitter.sendServerDeliver = sendServerDeliver;
 networkEmitter.broadcastPublicMessage =
-  broadcastPublicMessage ||
-  (async (opaque) => bus.emit("network:publicMessage", opaque));
+  broadcastPublicMessage || (async (opaque) => bus.emit("network:publicMessage", opaque));
 networkEmitter.advertiseUser = advertiseUser;
 networkEmitter.removeUser = removeUser;
 
 makeBridge(networkEmitter, [
-  ["network:userDeliver", "userDeliver"],
+  ["network:userDeliver",    "userDeliver"],
   ["network:presenceUpdate", "presenceUpdate"],
-  ["network:publicMessage", "publicMessage"],
+  ["network:publicMessage",  "publicMessage"],
   ["network:publicKeyShare", "publicKeyShare"],
-  ["network:publicUpdate", "publicUpdate"],
-  ["network:ack", "ack"],
-  ["network:error", "error"],
+  ["network:publicUpdate",   "publicUpdate"],
+  ["network:ack",            "ack"],
+  ["network:error",          "error"],
 ]);
 
 app.locals.network = networkEmitter;
@@ -178,19 +149,17 @@ app.locals.network = networkEmitter;
 const fileEmitter = new EventEmitter();
 fileEmitter.sendFileStart = sendFileStart;
 fileEmitter.sendFileChunk = sendFileChunk;
-fileEmitter.sendFileEnd = sendFileEnd;
+fileEmitter.sendFileEnd   = sendFileEnd;
 
 makeBridge(fileEmitter, [
   ["network:fileStart", "fileStart"],
   ["network:fileChunk", "fileChunk"],
-  ["network:fileEnd", "fileEnd"],
+  ["network:fileEnd",   "fileEnd"],
 ]);
 
 app.locals.fileService = fileEmitter;
 
-console.log(
-  "[SOCP] SLC facades ready: app.locals.network & app.locals.fileService"
-);
+console.log("[SOCP] SLC facades ready: app.locals.network & app.locals.fileService");
 
 // Start SLC (after app.locals are ready)
 try {
@@ -205,7 +174,7 @@ try {
   console.warn("[SLC] not started:", e?.message);
 }
 
-// Start HTTP server + Socket.IO
+// ===== Start HTTP server + Socket.IO (PORT 5001) =====
 const PORT = process.env.PORT || 5001;
 const server = app.listen(PORT, () => {
   console.log(`Server started on PORT: ${PORT}`);
@@ -218,22 +187,27 @@ const io = require("socket.io")(server, {
       "http://localhost:3000",
       "http://localhost:3001",
       "http://localhost:3002",
+      "http://localhost:5173"
     ],
+    credentials: true,
   },
 });
 
 io.on("connection", (socket) => {
   console.log("Connected to Socket.io");
 
-  // When client emits "setup" with its user data
+  // Join per-user room on setup (prefer SOCP user_id)
   socket.on("setup", (userData) => {
-    socket.join(userData.user_id);
+    const room = userData?.user_id || userData?._id;
+    if (room) socket.join(String(room));
     socket.emit("connected");
   });
 
   socket.on("join chat", (room) => {
-    socket.join(room);
-    console.log("User joined room:", room);
+    if (room) {
+      socket.join(String(room));
+      console.log("User Joined Room:", room);
+    }
   });
 
   socket.on("typing", (room) => socket.in(room).emit("typing"));
@@ -256,6 +230,31 @@ io.on("connection", (socket) => {
     console.log("USER DISCONNECTED");
   });
 });
+
+// ===== Bridge SOCP bus → Socket.IO (deliveries & files) =====
+bus.on("network:userDeliver", (frame) => {
+  try {
+    const to = frame?.to;
+    const from = frame?.from;
+    if (to)   io.to(String(to)).emit("message received", frame);
+    if (from) io.to(String(from)).emit("message received", frame); // echo to sender
+  } catch (e) {
+    console.error("[SOCP][bridge] userDeliver -> socket.io failed:", e);
+  }
+});
+
+for (const evt of ["network:fileStart", "network:fileChunk", "network:fileEnd"]) {
+  bus.on(evt, (frame) => {
+    try {
+      const to = frame?.to;
+      const from = frame?.from;
+      if (to)   io.to(String(to)).emit("file received", frame);
+      if (from) io.to(String(from)).emit("file received", frame); // echo
+    } catch (e) {
+      console.error(`[SOCP][bridge] ${evt} -> socket.io failed:`, e);
+    }
+  });
+}
 
 // SOCP background services
 try {
