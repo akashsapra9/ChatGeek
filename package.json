@@ -4,22 +4,38 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "start": "nodemon backend/server.js"
+    "start": "nodemon backend/server.js",
+    "socp:signCheck": "node backend/scripts/socp-sign-check.js",
+    "socp:wsCheck": "node backend/scripts/ws-smoke.js",
+    "socp:sigCheck": "node backend/scripts/sig-sanity.js",
+    "socp:presenceCheck": "node backend/scripts/presence-sanity.js",
+    "socp:deliverCheck": "node backend/scripts/deliver-sanity.js",
+    "socp:publicCheck": "node backend/scripts/public-sanity.js",
+    "socp:pubKeyshareCheck": "node backend/scripts/public-keyshare-sanity.js",
+    "socp:fileCheck": "node backend/scripts/file-sanity.js",
+    "socp:errorCheck": "node backend/scripts/error-sanity.js",
+    "socp:heartbeatCheck": "node backend/scripts/heartbeat-liveness-sanity.js"
   },
   "author": "Paksh Khattar",
   "license": "ISC",
   "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "axios": "^1.4.0",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.40.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-async-handler": "^1.2.0",
+    "fast-srp-hap": "^2.0.4",
     "jsonwebtoken": "^9.0.1",
     "mongodb": "^5.8.1",
     "mongoose": "^7.4.4",
+    "node-persist": "^4.0.4",
     "nodemon": "^3.0.1",
     "react-router-dom": "^5.3.4",
-    "socket.io": "^4.7.2"
+    "socket.io": "^4.7.2",
+    "uuid": "^13.0.0",
+    "ws": "^8.18.3"
   }
 }

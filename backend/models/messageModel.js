@@ -1,16 +1,79 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const messageModel = mongoose.Schema(
-    {
-        sender: { type:mongoose.Schema.Types.ObjectId, ref: "User" },
-        content: { type: String, trim: true },
-        chat: { type: mongoose.Schema.Types.ObjectId, ref: "Chat" }
+const messageSchema = mongoose.Schema(
+  {
+    message_id: {
+      type: String,
+      required: true,
+      unique: true,
     },
-    {
-        timestamps: true,
-    }
+    group_id: {
+      type: String,
+      required: true,
+    },
+    sender_id: {
+      type: String,
+      required: true,
+    },
+    ciphertext: {
+      // Changed from content to ciphertext
+      type: String,
+      required: true,
+    },
+    sender_pub: {
+      // Sender's public key for signature verification
+      type: String,
+      required: true,
+    },
+    content_sig: {
+      // Signature over ciphertext|from|to|ts
+      type: String,
+      required: true,
+    },
+    timestamp: {
+      // SOCP timestamp (Unix milliseconds)
+      type: Number,
+      required: true,
+    },
+    message_type: {
+      // Direct message or public channel
+      type: String,
+      enum: [
+        "MSG_DIRECT", // ✅ Direct message (DM)
+        "MSG_PUBLIC_CHANNEL", // ✅ Public channel message
+        "FILE_START", // ✅ File manifest
+        "FILE_CHUNK", // ✅ File chunk
+        "FILE_END", // ✅ File completion notice
+      ],
+      required: true,
+    },
+    recipient_id: {
+      // For direct messages (optional for public channel)
+      type: String,
+      required: false,
+    },
+    // Optional metadata for display
+    meta: {
+      type: Map,
+      of: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    version: {
+      type: Number,
+      required: true,
+      default: 1,
+    },
+  },
+  {
+    timestamps: true,
+  }
 );
 
-const Message = mongoose.model("Message", messageModel);
+// Index for querying messages by group and time
+messageSchema.index({ group_id: 1, timestamp: -1 });
 
-module.exports=Message;
+// Index for direct messages between users
+messageSchema.index({ sender_id: 1, recipient_id: 1, timestamp: -1 });
+
+const Message = mongoose.model("Message", messageSchema);
+module.exports = Message;

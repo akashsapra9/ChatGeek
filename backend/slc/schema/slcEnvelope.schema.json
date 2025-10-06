@@ -1,0 +1,44 @@
+{
+  "$id": "slcEnvelope",
+  "type": "object",
+  "required": [
+    "version",
+    "from",
+    "to",
+    "nonce",
+    "counter",
+    "op",
+    "body"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "from": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "to": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "nonce": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "counter": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "op": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "body": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}
