@@ -6,6 +6,7 @@ const {
   searchUsers,
 } = require("../controllers/userController");
 const { protect } = require("../middleware/authMiddleware");
+const requireSession = require("../middleware/requireSession");
 const router = express.Router();
 
 router.post("/register", registerUser);
@@ -18,7 +19,7 @@ router.get("/search", protect, searchUsers); // TODO: correct? to search users?
  * Auth: x-session-id header (checked by requireSession)
  * Returns safe fields, including privkey_store (needed client-side for decryption).
  */
-router.get('/me', requireSession, async (req, res) => {
+router.get("/me", requireSession, async (req, res) => {
   const u = req.userDoc;
 
   // Whitelist the fields you want to expose to the client
