@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const PakePasswordSchema = new mongoose.Schema({
   scheme:   { type: String, enum: ['srp-6a'], required: true },
@@ -12,44 +12,49 @@ const PakePasswordSchema = new mongoose.Schema({
 }, { _id: false });
 
 const userSchema = mongoose.Schema(
-    {
-        user_id: { 
-            type: String, 
-            required: true, 
-            unique: true 
-        },
-        pubkey: { 
-            type: String, 
-            required: true 
-        },
-        privkey_store: { 
-            type: String, 
-            required: true 
-        },
-        pake_password: {
-            type: PakePasswordSchema, 
-            required: true 
-        },
-        meta: {
-            display_name: String,
-            pronouns: String,
-            age: Number,
-            avatar_url: String,
-            extras: {
-                type: Map,
-                of: mongoose.Schema.Types.Mixed,
-                default: {}
-            }
-        },
-        version: { 
-            type: Number, 
-            required: true, 
-            default: 1 
-        }
+  {
+    user_id: {
+      type: String,
+      required: true,
+      unique: true, // internal UUID
     },
-    {
-        timestamps: true
-    }
+    login_email: {
+      type: String,
+      required: true,
+      unique: true, // user-typed email for login
+    },
+    pubkey: {
+      type: String,
+      required: true,
+    },
+    privkey_store: {
+      type: String,
+      required: true,
+    },
+    pake_password: {
+      type: String,
+      required: true,
+    },
+    meta: {
+      display_name: String,
+      pronouns: String,
+      age: Number,
+      avatar_url: String,
+      extras: {
+        type: Map,
+        of: mongoose.Schema.Types.Mixed,
+        default: {},
+      },
+    },
+    version: {
+      type: Number,
+      required: true,
+      default: 1,
+    },
+  },
+  {
+    timestamps: true,
+  }
 );
 
 const User = mongoose.model("User", userSchema);
