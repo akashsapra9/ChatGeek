@@ -12,6 +12,8 @@ const messageRoutes = require("./routes/messageRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const bus = require("./network/events");
 const fileRoutes = require("./routes/fileRoutes");
+const authSrpRoutes = require("./routes/authSrpRoutes");
+const requireSession = require("./middleware/requireSession");
 
 // Import models for public channel initialization
 const Group = require("./models/groupModel");
@@ -76,6 +78,7 @@ app.use(express.json());
 app.get("/", (_req, res) => res.send("API is Running"));
 
 // ===== Routes =====
+app.use("/api/auth/srp", authSrpRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
@@ -207,35 +210,20 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("typing", (room) => room && socket.in(String(room)).emit("typing"));
-  socket.on("stop typing", (room) => room && socket.in(String(room)).emit("stop typing"));
+  socket.on("typing", (room) => socket.in(room).emit("typing"));
+  socket.on("stop typing", (room) => socket.in(room).emit("stop typing"));
 
-  // Robust broadcast: supports legacy (chat.users) and SOCP {from,to}
-  socket.on("new message", (msg) => {
-    try {
-      // Legacy path (chat.users)
-      if (msg?.chat?.users?.length) {
-        const senderId = msg?.sender?.user_id || msg?.sender?._id;
-        for (const u of msg.chat.users) {
-          const uid = u?.user_id || u?._id;
-          if (!uid || uid === senderId) continue;
-          io.to(String(uid)).emit("message received", msg); // ✅ correct spelling
-        }
-        if (senderId) io.to(String(senderId)).emit("message received", msg); // echo to sender
-        return;
-      }
+  socket.on("new message", (newMessageReceived) => {
+    const chat = newMessageReceived.chat;
+    if (!chat?.users) return console.log("chat.users not defined");
 
-      // SOCP direct message path
-      const to = msg?.to || msg?.recipient_id;
-      const from = msg?.from || msg?.sender_id;
-      if (to)   io.to(String(to)).emit("message received", msg);
-      if (from) io.to(String(from)).emit("message received", msg); // echo
+    chat.users.forEach((user) => {
+      // skip sender
+      if (user.user_id === newMessageReceived.sender.user_id) return;
 
-      // Optional: group/chat room broadcast if you maintain chat rooms
-      if (msg?.chat_id) io.to(String(msg.chat_id)).emit("message received", msg);
-    } catch (e) {
-      console.error("[SOCP][new message] broadcast error:", e);
-    }
+      // emit to each recipient’s user_id room
+      socket.in(user.user_id).emit("message received", newMessageReceived);
+    });
   });
 
   socket.off("setup", () => {

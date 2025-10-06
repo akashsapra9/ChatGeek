@@ -4,18 +4,19 @@ import { Tabs, TabList, TabPanels, Tab, TabPanel } from '@chakra-ui/react'
 import Login from '../components/Authentication/Login'
 import Signup from '../components/Authentication/Signup'
 import { useHistory } from 'react-router-dom'
+import { ChatState } from "../Context/chatProvider";
+
 
 
 const HomePage = () => {
 
+    const { privateKey } = ChatState();
+    
     const history = useHistory();
 
     useEffect(() => {
         const user = JSON.parse(localStorage.getItem("userInfo"));
-        if(user)
-        {
-            history.push("/chats")
-        }
+        if (user && privateKey) history.push("/chats");
     }, [history]);
 
     return (

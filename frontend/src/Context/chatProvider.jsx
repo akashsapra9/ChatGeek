@@ -16,12 +16,13 @@ const ChatProvider = ({ children }) => {
     // auto-load user from localStorage
     useEffect(() => {
         const userInfo = JSON.parse(localStorage.getItem("userInfo"));
-        setUser(userInfo);
-
         if (!userInfo) {
-            history.push('/')
+          setUser(null);
+          history.push("/");
+          return;
         }
-    }, [history]);
+        setUser(userInfo);
+      }, [history]);
 
     // 🔒 Auto-logout and clear private key after 15 minutes
     useEffect(() => {

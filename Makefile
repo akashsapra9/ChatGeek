@@ -6,7 +6,8 @@ front2:
 	cd frontend && npm start
 front3:
 	cd frontend && npm start
-
+clean:
+	rm -rf node_modules && rm -rf frontend/node_modules
 # Check PORTS
 lsof -i :5000
 lsof -i :5001
