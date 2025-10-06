@@ -1,5 +1,16 @@
 const mongoose = require("mongoose");
 
+const PakePasswordSchema = new mongoose.Schema({
+  scheme:   { type: String, enum: ['srp-6a'], required: true },
+  group:    { type: String, enum: ['rfc5054-4096'], required: true },
+  g:        { type: Number, enum: [5], required: true },
+  hash:     { type: String, enum: ['SHA-256'], required: true },
+  salt:     { type: String, required: true },     // base64url (no padding)
+  verifier: { type: String, required: true },     // base64url (no padding)
+  k:        { type: String, enum: ['derived'], required: true },
+  version:  { type: Number, default: 1 },
+}, { _id: false });
+
 const userSchema = mongoose.Schema(
   {
     user_id: {

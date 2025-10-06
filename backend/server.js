@@ -12,6 +12,9 @@ const messageRoutes = require("./routes/messageRoutes");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 const bus = require("./network/events");
 const fileRoutes = require("./routes/fileRoutes");
+const authSrpRoutes = require('./routes/authSrpRoutes');
+const requireSession = require('./middleware/requireSession');
+
 
 // Import models for public channel initialization
 const Group = require("./models/groupModel");
@@ -84,7 +87,11 @@ app.use(express.json());
 app.get("/", (_req, res) => res.send("API is Running"));
 
 // ===== Routes =====
+app.use('/api/auth/srp', authSrpRoutes);
 app.use("/api/user", userRoutes);
+
+app.use(requireSession);
+
 app.use("/api/chat", chatRoutes);
 app.use("/api/message", messageRoutes);
 app.use("/api/file", fileRoutes);
@@ -221,7 +228,7 @@ io.on("connection", (socket) => {
 
   // When client emits "setup" with its user data
   socket.on("setup", (userData) => {
-    socket.join(userData.user_id); // ✅ use user_id now
+    socket.join(userData.user_id);
     socket.emit("connected");
   });
 
@@ -238,10 +245,10 @@ io.on("connection", (socket) => {
     if (!chat?.users) return console.log("chat.users not defined");
 
     chat.users.forEach((user) => {
-      // ✅ skip sender
+      // skip sender
       if (user.user_id === newMessageRecieved.sender.user_id) return;
 
-      // ✅ emit to each recipient’s user_id room
+      // emit to each recipient’s user_id room
       socket.in(user.user_id).emit("message recieved", newMessageRecieved);
     });
   });
