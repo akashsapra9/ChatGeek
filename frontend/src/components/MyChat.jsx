@@ -17,7 +17,7 @@ import {
 import axios from "axios";
 import { AddIcon } from "@chakra-ui/icons";
 import ChatLoading from "./ChatLoading";
-import { getSender, getSenderpic } from "../config/chatlogics";
+import { getSender, getSenderPic } from "../config/chatlogics";
 import GroupChatModal from "./misc/GroupChatModal";
 import CommunityModal from "./misc/CommunityModal";
 
@@ -28,7 +28,7 @@ const MyChat = ({ fetchAgain }) => {
 
   // 🧠 Helper: gracefully check for user picture
   const picCheck = (chat) => {
-    const picture = getSenderpic(loggedUser, chat.users);
+    const picture = getSenderPic(loggedUser, chat.users);
     if (
       picture ===
       "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg"
@@ -152,7 +152,7 @@ const MyChat = ({ fetchAgain }) => {
                           cursor="pointer"
                           src={
                             picCheck(chat)
-                              ? getSenderpic(loggedUser, chat.users)
+                              ? getSenderPic(loggedUser, chat.users)
                               : getSender(loggedUser, chat.users)
                           }
                           name={getSender(loggedUser, chat.users)}

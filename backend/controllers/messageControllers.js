@@ -5,88 +5,116 @@ const Group = require("../models/groupModel");
 const { v4: uuidv4 } = require("uuid");
 
 /* ------------------------------------------------------------------
-   SEND MESSAGE (SOCP v1.3 format)
+   /api/message (SOCP v1.3 compliant)
+   Accepts full JSON envelope from client
 ------------------------------------------------------------------- */
+// ! important: POST /api/message
+
 const sendMessage = asyncHandler(async (req, res) => {
-  const {
-    toUserId, // recipient UUID (for DM)
-    group_id, // optional (for group/public)
-    ciphertext, // encrypted body
-    sender_pub, // sender's RSA public key
-    content_sig, // signature
-    ts, // SOCP timestamp (ms)
-    message_type, // 'direct' or 'public'
-  } = req.body;
+  const frame = req.body || {};
 
-  // Validation
-  if (!ciphertext || !content_sig || !sender_pub) {
-    return res
-      .status(400)
-      .json({ ok: false, error: "Missing ciphertext or signature or pubkey" });
+  // -------------------------------
+  // 1. Basic validation of envelope
+  // -------------------------------
+  if (!frame?.type || !frame?.from || !frame?.to) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid envelope: missing type/from/to",
+    });
   }
 
-  const sender_id = req.user.user_id;
-  const timestamp = ts || Date.now();
+  const { type, from, to, ts, payload, sig } = frame;
+  const timestamp = Number.isInteger(ts) ? ts : Date.now();
+  const toUserId = to;
+  const chatId = null; //!! WARNING: no explicit chatId in SOCP; keep null for consistency
 
-  // For DMs, ensure toUserId is defined
-  if (message_type === "direct" && !toUserId) {
-    return res
-      .status(400)
-      .json({ ok: false, error: "Missing recipient ID for DM" });
+  // -------------------------------
+  // 2. Decide mode + payload for network
+  // -------------------------------
+  let mode, payloadForNetwork;
+
+  if (payload?.ciphertext) {
+    const signature = payload.content_sig;
+    if (!signature) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "missing_signature_for_ciphertext" });
+    }
+    mode = "encrypted";
+    payloadForNetwork = {
+      ciphertext: payload.ciphertext,
+      signature: signature,
+    };
+  } else if (
+    typeof payload?.content === "string" &&
+    payload.content.length > 0
+  ) {
+    mode = "plaintext";
+    payloadForNetwork = { content: payload.content }; //! WARNING? How could there be a plaintext message here?
+  } else {
+    return res.status(400).json({ ok: false, error: "missing_message_body" });
   }
 
-  // Generate message UUID
+  // -------------------------------
+  // 3. Save message locally
+  // -------------------------------
   const message_id = uuidv4();
-
-  // Construct database record
   const messageDoc = {
     message_id,
-    group_id: group_id || "direct",
-    sender_id,
-    ciphertext,
-    sender_pub,
-    content_sig,
+    group_id: type === "MSG_PUBLIC_CHANNEL" ? "public" : "direct",
+    sender_id: from,
+    recipient_id: type === "MSG_DIRECT" ? to : null,
+    ciphertext: payload.ciphertext || null,
+    sender_pub: payload.sender_pub || null,
+    content_sig: payload.content_sig || null,
     timestamp,
-    message_type: message_type || "direct",
-    recipient_id: toUserId || null,
+    message_type: type,
     version: 1,
   };
 
   try {
-    const savedMessage = await Message.create(messageDoc);
+    await Message.create(messageDoc);
 
-    // Update "latestMessage" equivalent if group exists
-    if (group_id) {
+    if (type === "MSG_PUBLIC_CHANNEL") {
       await Group.updateOne(
-        { group_id },
+        { group_id: "public" },
         { $set: { "meta.latest_message": message_id } }
       );
     }
 
-    // Deliver to SOCP network
+    // -------------------------------
+    // 4. Forward to overlay network (same as SLC)
+    // -------------------------------
     if (!req.app.locals?.network?.sendServerDeliver) {
-      console.warn("[SOCP][sendMessage] ⚠️ No network layer available");
-    } else {
-      const payload = {
-        ciphertext,
-        sender_pub,
-        content_sig,
-      };
-      const mode = message_type === "public" ? "public" : "direct";
-      await req.app.locals.network.sendServerDeliver(
-        toUserId || group_id,
-        payload,
-        { fromUser: sender_id, mode }
-      );
+      console.error("[SOCP][sendMessage] ❌ network_api_missing");
+      return res.status(500).json({ ok: false, error: "network_api_missing" });
     }
 
-    return res.status(200).json({ ok: true, message: savedMessage });
+    await req.app.locals.network.sendServerDeliver(
+      toUserId,
+      payloadForNetwork,
+      { chatId, mode }
+    );
+
+    // -------------------------------
+    // 5. Local HTTP ack (to sender only)
+    // -------------------------------
+    return res.status(200).json({
+      ok: true,
+      payload_ofSender: frame,
+    });
   } catch (err) {
-    console.error("[SOCP][sendMessage] DB error:", err);
-    return res.status(400).json({ ok: false, error: err.message });
+    console.error("[SOCP][sendMessage] Error:", err);
+    return res.status(500).json({
+      type: "ERROR",
+      from: req.app.locals.server_id || "server_1",
+      to: from || "unknown",
+      ts: Date.now(),
+      payload: { code: "SERVER_ERROR", detail: err.message },
+      sig: "",
+    });
   }
 });
-
 /* ------------------------------------------------------------------
    GET ALL MESSAGES IN CHAT OR GROUP
 ------------------------------------------------------------------- */

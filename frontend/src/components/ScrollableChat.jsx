@@ -11,55 +11,64 @@ import {
 } from "../config/chatlogics";
 
 const ScrollableChat = ({ messages }) => {
-  const { user } = ChatState();
+  /*
+  The  message object that is passed to this component has the following structure:
+
+  (1) for text messages:
+    { plaintext, from, to, ts, type: "MSG_PUBLIC_CHANNEL" }
+  (2) for file:
+        const newFileMsg = {
+        type: "FILE",
+        name: selectedFile.name,
+        url: fileUrl,
+        plaintext: `[File: ${selectedFile.name}]`,
+        from,
+        to,
+        ts: Date.now(),
+      };
+  */
+  const { user, selectedChat } = ChatState();
 
   // TODO: SECURITY RISKS
-  // 🧠 Handle plaintext vs ciphertext
   const getPlaintext = (m) => {
     // In testing, plaintext may still be available.
     if (m.plaintext) {
-      console.warn(
-        "[SOCP][ScrollableChat] plaintext message detected:",
-        m.message_id
-      );
+      console.warn("[SOCP][ScrollableChat] plaintext message detected! SEcurity risk!");
       return m.plaintext;
     }
-
-    // For SOCP messages, ciphertext is always a base64url string
-    if (m.ciphertext) return "[encrypted message]";
-    return "[no content]";
+    return "[debug][scrollablechat.jsx getPlaintext] [no content]";
   };
 
   return (
     <ScrollableFeed>
       {messages &&
         messages.map((m, i) => {
-          // 🧠 Identify sender
-          const senderId =
-            m.sender_id || getSenderId(m) || m.sender?.user_id || "unknown";
-          const isMine = senderId === user?.user_id;
+          // Identify sender
+          const senderId = getSenderId(m);
+          const isMine = senderId === user.user_id;
 
-          const displayName =
-            m.sender_meta?.display_name ||
-            m.sender?.meta?.display_name ||
-            (isMine ? "You" : senderId);
-
-          const avatarSrc =
-            m.sender_meta?.avatar_url ||
-            m.sender?.meta?.avatar_url ||
-            "";
-
-          return (
+          // Get our display name and avatar
+          const senderObj = selectedChat?.users?.find((u) => u.user_id === senderId);
+          // TODO: this version may not work with group chat, only DM
+          const displayName = isMine
+            ? "You"
+            : senderObj?.meta?.display_name || senderObj?.login_email || senderId;
+          const avatarSrc = isMine
+            ? user?.meta?.avatar_url || ""
+            : senderObj?.meta?.avatar_url ||
+              "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
+          
+              return (
             <div
-              key={m.message_id || m.timestamp || i}
+              key={m.message_id || m.ts || i} // Note that there is no message_id yet.
               style={{
                 display: "flex",
                 justifyContent: isMine ? "flex-end" : "flex-start",
                 alignItems: "center",
               }}
             >
-              {(isSameSender(messages, m, i, user?.user_id) ||
-                isLastMessage(messages, i, user?.user_id)) && (
+              {(isSameSender(messages, m, i, user?.user_id) || // “Show the avatar if this message was not sent by me (curr !== userId) and the next message is from a different sender (curr !== next).”
+                isLastMessage(messages, i, user?.user_id)) && ( // “If this message is from someone else and it’s the very last one in the chat, show their avatar.”
                 <Tooltip
                   label={displayName}
                   placement="bottom-start"
@@ -82,9 +91,7 @@ const ScrollableChat = ({ messages }) => {
                   marginLeft: !isMine
                     ? isSameSenderMargin(messages, m, i, user?.user_id)
                     : 0,
-                  marginTop: isSameUser(messages, m, i, user?.user_id)
-                    ? 3
-                    : 10,
+                  marginTop: isSameUser(messages, m, i) ? 3 : 10,
                   borderRadius: "20px",
                   padding: "5px 15px",
                   maxWidth: "75%",
@@ -111,6 +118,11 @@ const ScrollableChat = ({ messages }) => {
                   </a>
                 ) : (
                   getPlaintext(m)
+                )}
+                {m.successful && (
+                  <span style={{ fontSize: "0.75rem", marginLeft: "6px", color: "gray" }}>
+                    ✓
+                  </span>
                 )}
               </span>
             </div>
