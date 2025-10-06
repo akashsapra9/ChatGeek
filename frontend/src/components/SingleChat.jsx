@@ -47,39 +47,54 @@ const normalizeDeliveredFrame = async (frame, myPrivKey) => {
   const { payload } = frame || {};
   if (!payload) return { ...frame, plaintext: "[invalid payload]" };
 
-  const { ciphertext, sender, sender_pub, content_sig } = payload;
+  // SOCP v1.3 structure
+  const { ciphertext, sender_pub, content_sig } = payload;
+  const sender = frame.from; // <-- Correct field location
+  const normalizedSenderPub = sender_pub.includes("BEGIN PUBLIC KEY")
+  ? pemToBase64Url(sender_pub)
+  : sender_pub;
+
   try {
     const plaintext = await decryptMessage(ciphertext, myPrivKey);
 
-    // Try verify
+    // Prepare canonical verification inputs (SOCP §12)
+    const dmString = `${ciphertext}${frame.from}${frame.to}${frame.ts}`;
+    const pubString = `${ciphertext}${frame.from}${frame.ts}`;
+
     let ok = false;
+
+    // Try DM pattern first
     try {
-      ok = await verifyMessage(
-        signDataDM(ciphertext, frame.from, frame.to, frame.ts),
-        content_sig,
-        sender_pub
-      );
-    } catch (_) {}
+      ok = await verifyMessage(dmString, content_sig, normalizedSenderPub);
+      if (!ok)
+        console.warn("[SOCP][verify] DM pattern failed, trying public-channel pattern");
+    } catch (err) {
+      console.warn("[SOCP][verify] DM pattern threw:", err);
+    }
+
+    // Fallback: public channel pattern
     if (!ok) {
       try {
-        ok = await verifyMessage(
-          signDataPublic(ciphertext, frame.from, frame.ts),
-          content_sig,
-          sender_pub
-        );
-      } catch (_) {}
+        ok = await verifyMessage(pubString, content_sig, normalizedSenderPub);
+      } catch (err) {
+        console.warn("[SOCP][verify] Public pattern threw:", err);
+      }
     }
+
+    console.log(
+      `[SOCP][normalizeDeliveredFrame] Verified=${ok}`,
+      { from: frame.from, to: frame.to, ts: frame.ts }
+    );
 
     return {
       ...frame,
       from: sender,
-      to: frame.to,
       plaintext: ok ? plaintext : "[invalid signature]",
       successful: ok,
     };
   } catch (err) {
     console.error("[SOCP] decrypt failed:", err);
-    return { ...frame, plaintext: "[decryption failed]", sender };
+    return { ...frame, plaintext: "[decryption failed]", from: sender };
   }
 };
 
@@ -137,7 +152,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
 
       const normalized = await Promise.all(
         (frames || []).map((f) => normalizeDeliveredFrame(f, normalizedMyPrivKey))
-      );
+      ); // TODO: f might not be compatible to normalizeDeliveredFrame
       setMessages(normalized);
       setLoading(false);
 
@@ -228,7 +243,12 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         // add plaintext directly into frame (top-level, not inside payload)
         const newFrame = { ...frame, plaintext, successful: ok };
         setMessages((prev) => [...prev, newFrame]);
-        socket.emit("new message", response);
+        const compat = {
+          chat: { users: selectedChat.users },
+          sender: { user_id: user.user_id },
+          frame, // include full SOCP frame if you want backend compatibility later
+        };
+        socket.emit("new message", compat);
         return;
       }
 
@@ -274,7 +294,12 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
             okAll = false;
           }
 
-          socket.emit("new message", frame); // your existing behavior
+          const compat = {
+            chat: { users: selectedChat.users },
+            sender: { user_id: user.user_id },
+            frame, // include full SOCP frame if you want backend compatibility later
+          };
+          socket.emit("new message", compat); // your existing behavior
           lastFrame = frame;                 // use the last-built frame as representative
         }
 
@@ -284,9 +309,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         if (lastFrame) {
           const echoFrame = { ...lastFrame, plaintext, successful: okAll };
           setMessages((prev) => [...prev, echoFrame]);
-
-          // Optional: usually you don't need to emit your local echo again.
-          // socket.emit("new message", echoFrame);
         }
 
         return;
@@ -366,7 +388,12 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         };
 
         setMessages((prev) => [...prev, newFileMsg]);
-        socket.emit("new message", newFileMsg);
+        const compat = {
+          chat: { users: selectedChat.users },
+          sender: { user_id: user.user_id },
+          frame: newFileMsg,
+        };
+        socket.emit("new message", compat);
 
         setSelectedFile(null);
         fileInputRef.current.value = "";
@@ -416,7 +443,12 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         };
 
         setMessages((prev) => [...prev, newFileMsg]);
-        socket.emit("new message", newFileMsg);
+        const compat = {
+          chat: { users: selectedChat.users },
+          sender: { user_id: user.user_id },
+          frame: newFileMsg,
+        };
+        socket.emit("new message", compat); //! SECURITY WARNING: can we send the full file url and plaintext here?
         setSelectedFile(null);
         toast({ title: "File sent to group!", status: "success" });
       }
@@ -482,7 +514,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     const receiver = new FileReceiver();
 
     const fileHandler = async (frame) => {
-      console.log("[SOCP] [File frame received] incoming file frame:", frame);
+      console.log("[SOCP] [File frame received] incoming file frame:", frame.frame);
 
       // derive a normalized version (PEM → Base64URL if needed)
       const normalizedMyPrivKey = myPrivKey.includes("BEGIN PRIVATE KEY")
